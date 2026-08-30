@@ -253,6 +253,14 @@ Panel {
             }
           }
 
+          Button {
+            visible: root.ready && !authenticator.synced
+            width: parent.width
+            text: "Sign in to Proton sync"
+            foreground: root.foreground
+            onClicked: authenticator.launchLogin()
+          }
+
           Column {
             visible: !root.ready
             width: parent.width

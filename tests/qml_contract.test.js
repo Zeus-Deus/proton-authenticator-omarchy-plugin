@@ -20,6 +20,12 @@ test('the panel renders current and next codes from validated helper rows', () =
   assert.match(panel, /remainingSeconds/);
 });
 
+test('ready local state exposes a Proton sync sign-in action', () => {
+  assert.match(panel, /Sign in to Proton sync/);
+  assert.match(panel, /!authenticator\.synced/);
+  assert.match(panel, /authenticator\.launchLogin\(\)/);
+});
+
 test('copy sends only an opaque item id to the helper', () => {
   assert.match(service, /function copyCode\(itemId\)/);
   assert.match(service, /"copy",\s*id/);
