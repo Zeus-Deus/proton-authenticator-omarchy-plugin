@@ -26,15 +26,18 @@
 ## Gates
 
 ```bash
-node --test tests/model.test.js
+node --test tests/model.test.js tests/qml_contract.test.js
 python3 -m unittest tests/test_installer.py -v
+qmllint -I /usr/share/omarchy/shell Service.qml AuthenticatorIcon.qml
 omarchy plugin validate .
 omarchy-restart-shell
 qs log -p /usr/share/omarchy/shell --tail 60
 omarchy-shell proton-authenticator-companion status
 ```
 
-`qmllint` is not a gate: it cannot resolve `qs.Ui`/`qs.Commons`.
+`Panel.qml` exits 255 without diagnostics in standalone `qmllint` because the
+linter cannot resolve Omarchy's injected `qs.Ui`/`qs.Commons` types. Validate it
+with `omarchy plugin validate`, a real shell restart, IPC status, and shell logs.
 Panel QML edits require `omarchy-restart-shell`.
 
 ## Manual acceptance
