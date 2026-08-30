@@ -147,14 +147,20 @@ Panel {
         if (!root.cursorActive) { root.cursorActive = true; return }
         if (dy !== 0) root.moveCursor(dy)
       }
-      onActivateRequested: root.copySelected()
+      onActivateRequested: {
+        if (root.ready) root.copySelected()
+        else authenticator.launchLogin()
+      }
       onCloseRequested: root.close()
       onTabRequested: function(direction) { root.switchPanel(direction) }
       onTextKey: function(text) {
         if (text === "/") searchField.forceActiveFocus()
         else if (text === "r" || text === "R") authenticator.refresh()
         else if (text === "c" || text === "C") root.copySelected()
-        else if (text === "l" || text === "L") authenticator.lock()
+        else if (text === "l" || text === "L") {
+          if (authenticator.locked) authenticator.launchLogin()
+          else authenticator.lock()
+        }
       }
 
       Flickable {
@@ -287,7 +293,9 @@ Panel {
           Text {
             width: parent.width
             textFormat: Text.PlainText
-            text: "j/k select  ·  enter/c copy  ·  / search  ·  r refresh  ·  l lock"
+            text: root.ready
+              ? "j/k select  ·  enter/c copy  ·  / search  ·  r refresh  ·  l lock"
+              : (authenticator.locked ? "enter/l unlock  ·  r refresh" : "enter sign in  ·  r refresh")
             color: root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
