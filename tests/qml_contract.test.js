@@ -5,22 +5,32 @@ const path = require('node:path');
 
 const service = fs.readFileSync(path.join(__dirname, '..', 'Service.qml'), 'utf8');
 const panel = fs.readFileSync(path.join(__dirname, '..', 'Panel.qml'), 'utf8');
-const serviceCode = service.replace(/\/\/.*$/gm, '');
 const executableCode = (service + panel).replace(/\/\/.*$/gm, '');
 
-test('refresh re-probes the executable after an explicit install', () => {
-  assert.match(serviceCode, /function refresh\(\)\s*\{\s*if \(!installed\) \{ start\(\); return \}/);
-});
-
-test('status polling runs only while the panel is open', () => {
+test('snapshot polling uses the bounded local helper client only while the panel is open', () => {
+  assert.match(service, /helper_client\.py/);
+  assert.match(service, /snapshot/);
+  assert.match(service, /Model\.parseHelperSnapshot/);
   assert.match(service, /running:\s*root\.panelOpen/);
 });
 
-test('the panel never renders or copies TOTP material', () => {
-  assert.doesNotMatch(executableCode, /wl-copy|generateCode|generate_code|IndexedDB|keyring.*get|clipboard.*read/i);
+test('the panel renders current and next codes from validated helper rows', () => {
+  assert.match(panel, /entry\.code/);
+  assert.match(panel, /entry\.nextCode/);
+  assert.match(panel, /remainingSeconds/);
 });
 
-test('the installer handoff stays visible and prompting', () => {
-  assert.match(service, /omarchy-launch-terminal.*python3.*installerPath/);
-  assert.doesNotMatch(service, /install_official_appimage\.py.*--yes/);
+test('copy sends only an opaque item id to the helper', () => {
+  assert.match(service, /function copyCode\(itemId\)/);
+  assert.match(service, /"copy",\s*id/);
+  assert.doesNotMatch(executableCode, /wl-copy|xclip|clipboard.*write|clipboard.*read/i);
+});
+
+test('QML never implements Proton auth, vault reads, or code generation', () => {
+  assert.doesNotMatch(executableCode, /generateCode|generate_code|IndexedDB|keyring.*get|password|accessToken|refreshToken/i);
+});
+
+test('login handoff launches a fixed helper executable without credentials', () => {
+  assert.match(service, /proton-authenticator-omarchy-helper/);
+  assert.doesNotMatch(service, /launchLogin[\s\S]{0,500}(password|token|secret)/i);
 });

@@ -7,50 +7,66 @@ import qs.Commons
 import qs.Ui
 import "Model.js" as Model
 
-// Omarchy-native companion for Proton's official Authenticator app. It does not
-// render codes: Proton content-protects its window and exposes no supported
-// third-party CLI/API. Keeping the vault out of the unsandboxed shell process is
-// a feature, not a missing implementation.
+// Panel-native Proton Authenticator view. Authentication, encrypted sync,
+// generation, and clipboard writes stay in the pinned local helper. Displaying
+// bounded current/next codes here is intentional and user-requested.
 Panel {
   id: root
   moduleName: "io.github.zeus-deus.proton-authenticator"
-  ipcTarget: "proton-authenticator-companion"
+  ipcTarget: "proton-authenticator"
   manageIpc: false
 
-  property int actionIndex: 0
+  property int selectedIndex: 0
   property bool cursorActive: false
-
+  readonly property var filteredEntries: Model.filterEntries(authenticator.entries, searchField.text)
   readonly property color foreground: bar ? bar.foreground : Color.foreground
   readonly property color urgent: bar ? bar.urgent : Color.urgent
   readonly property color dim: Qt.darker(foreground, 1.55)
-  readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
   readonly property color hoverFill: Style.hoverFillFor(foreground, Color.accent)
-  readonly property string heroMeta: Model.heroMeta({
-    checked: authenticator.checked,
-    installed: authenticator.installed,
-    running: authenticator.running,
-    error: authenticator.error
-  })
-  readonly property string primaryTitle: authenticator.installed
-    ? (authenticator.running ? "Focus Authenticator" : "Open Authenticator")
-    : "Install official AppImage"
-  readonly property string primarySubtitle: authenticator.installed
-    ? "Login and copy codes in Proton's protected app"
-    : "User-local install · signed by Proton · confirmation required"
+  readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
+  readonly property bool ready: authenticator.available && authenticator.state === "ready" && !authenticator.locked
 
-  function moveCursor(dx, dy) {
+  function heroMeta() {
+    if (!authenticator.checked) return "Connecting to secure helper…"
+    if (!authenticator.available) return authenticator.error || "Secure helper unavailable"
+    if (authenticator.state === "needs_login") return "Sign in to enable encrypted sync"
+    if (authenticator.locked) return "Locked"
+    if (authenticator.error !== "") return authenticator.error
+    var count = authenticator.entries.length
+    return count + (count === 1 ? " code" : " codes") + (authenticator.synced ? " · synced" : " · local")
+  }
+
+  function selectedEntry() {
+    if (filteredEntries.length === 0) return null
+    selectedIndex = Math.max(0, Math.min(selectedIndex, filteredEntries.length - 1))
+    return filteredEntries[selectedIndex]
+  }
+
+  function moveCursor(delta) {
+    if (filteredEntries.length === 0) return
     cursorActive = true
-    if (dy !== 0) actionIndex = Math.max(0, Math.min(3, actionIndex + (dy > 0 ? 1 : -1)))
+    selectedIndex = Math.max(0, Math.min(filteredEntries.length - 1, selectedIndex + delta))
+    scrollSelectedIntoView()
   }
 
-  function activateAction(index) {
-    if (index === 0) authenticator.launchOrFocus()
-    else if (index === 1) authenticator.refresh()
-    else if (index === 2) authenticator.openDownloadPage()
-    else if (index === 3) authenticator.openSupport()
+  function copySelected() {
+    var entry = selectedEntry()
+    if (entry) authenticator.copyCode(entry.id)
   }
 
-  function activateCursor() { activateAction(actionIndex) }
+  function scrollSelectedIntoView() {
+    Qt.callLater(function() {
+      if (!codeColumn || selectedIndex < 0 || selectedIndex >= codeColumn.children.length) return
+      var item = codeColumn.children[selectedIndex]
+      var point = item.mapToItem(panelFlick.contentItem, 0, 0)
+      var top = point.y
+      var bottom = top + item.height
+      var maxY = Math.max(0, panelFlick.contentHeight - panelFlick.height)
+      if (top < panelFlick.contentY) panelFlick.contentY = Math.max(0, top)
+      else if (bottom > panelFlick.contentY + panelFlick.height)
+        panelFlick.contentY = Math.min(maxY, bottom - panelFlick.height)
+    })
+  }
 
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
@@ -58,11 +74,16 @@ Panel {
   onOpenedChanged: {
     authenticator.panelOpen = opened
     if (opened) {
-      actionIndex = 0
+      selectedIndex = 0
       cursorActive = false
       authenticator.refresh()
       Qt.callLater(function() { keyCatcher.forceActiveFocus() })
+    } else {
+      searchField.text = ""
     }
+  }
+  onFilteredEntriesChanged: {
+    selectedIndex = Math.max(0, Math.min(selectedIndex, Math.max(0, filteredEntries.length - 1)))
   }
 
   Service {
@@ -78,13 +99,17 @@ Panel {
     function hide(): void { root.close() }
     function toggle(): void { root.toggle() }
     function refresh(): string { authenticator.refresh(); return "ok" }
-    function launch(): string { authenticator.launchOrFocus(); return "ok" }
+    function login(): string { authenticator.launchLogin(); return "ok" }
+    function lock(): string { authenticator.lock(); return "ok" }
+    function copy(itemId: string): string { authenticator.copyCode(itemId); return "ok" }
     function status(): string {
       return JSON.stringify({
         checked: authenticator.checked,
-        installed: authenticator.installed,
-        running: authenticator.running,
-        binary: authenticator.binaryPath,
+        available: authenticator.available,
+        state: authenticator.state,
+        locked: authenticator.locked,
+        synced: authenticator.synced,
+        count: authenticator.entries.length,
         error: authenticator.error
       })
     }
@@ -96,11 +121,10 @@ Panel {
     bar: root.bar
     text: "󰒃"
     foreground: root.foreground
-    active: authenticator.running
-    tooltipText: authenticator.running ? "Proton Authenticator is open" : "Proton Authenticator"
+    active: root.ready
+    tooltipText: authenticator.locked ? "Proton Authenticator · locked" : "Proton Authenticator"
     onPressed: function(buttonCode) {
-      if (buttonCode === Qt.RightButton) authenticator.launchOrFocus()
-      else if (buttonCode === Qt.MiddleButton) authenticator.refresh()
+      if (buttonCode === Qt.MiddleButton) authenticator.refresh()
       else root.toggle()
     }
   }
@@ -112,24 +136,25 @@ Panel {
     bar: root.bar
     open: root.opened
     focusTarget: keyCatcher
-    contentWidth: panel.fittedContentWidth(Style.space(390))
-    contentHeight: panel.fittedContentHeight(panelFlick.contentHeight, Style.space(520))
+    contentWidth: panel.fittedContentWidth(Style.space(430))
+    contentHeight: panel.fittedContentHeight(panelFlick.contentHeight, Style.space(620))
 
     PanelKeyCatcher {
       id: keyCatcher
       anchors.fill: parent
+      blocked: searchField.activeFocus
       onMoveRequested: function(dx, dy) {
         if (!root.cursorActive) { root.cursorActive = true; return }
-        root.moveCursor(dx, dy)
+        if (dy !== 0) root.moveCursor(dy)
       }
-      onActivateRequested: if (root.cursorActive) root.activateCursor()
+      onActivateRequested: root.copySelected()
       onCloseRequested: root.close()
       onTabRequested: function(direction) { root.switchPanel(direction) }
       onTextKey: function(text) {
-        if (text === "r" || text === "R") authenticator.refresh()
-        else if (text === "o" || text === "O") authenticator.launchOrFocus()
-        else if (text === "d" || text === "D") authenticator.openDownloadPage()
-        else if (text === "s" || text === "S") authenticator.openSupport()
+        if (text === "/") searchField.forceActiveFocus()
+        else if (text === "r" || text === "R") authenticator.refresh()
+        else if (text === "c" || text === "C") root.copySelected()
+        else if (text === "l" || text === "L") authenticator.lock()
       }
 
       Flickable {
@@ -150,12 +175,12 @@ Panel {
 
           PanelHero {
             width: parent.width
-            title: "Proton Authenticator"
-            meta: root.heroMeta
-            detail: authenticator.installed ? "OFFICIAL APP" : "SETUP"
+            title: authenticator.account || "Proton Authenticator"
+            meta: root.heroMeta()
+            detail: authenticator.synced ? "PROTON SYNC" : "AUTHENTICATOR"
             foreground: root.foreground
             fontFamily: root.fontFamily
-            iconOpacity: authenticator.installed ? 1.0 : 0.55
+            iconOpacity: root.ready ? 1.0 : 0.55
             iconComponent: Component {
               AuthenticatorIcon {
                 iconSize: Style.font.display
@@ -172,103 +197,102 @@ Panel {
             color: root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.bodySmall
-            wrapMode: Text.WordWrap
+            horizontalAlignment: Text.AlignHCenter
           }
 
-          PanelSeparator { width: parent.width; foreground: root.foreground }
-
-          Column {
+          TextField {
+            id: searchField
+            visible: root.ready && authenticator.entries.length > 0
             width: parent.width
-            spacing: Style.space(6)
-
-            PanelSectionHeader {
-              text: "AUTHENTICATOR"
-              foreground: root.foreground
-              fontFamily: root.fontFamily
-            }
-
-            ActionRow {
-              rowIndex: 0
-              iconText: authenticator.running ? "󰁔" : (authenticator.installed ? "󰐊" : "󰋺")
-              title: root.primaryTitle
-              subtitle: root.primarySubtitle
-            }
-            ActionRow {
-              rowIndex: 1
-              iconText: "󰑐"
-              title: "Refresh status"
-              subtitle: authenticator.busy ? "Checking application state…" : "Recheck installation and open windows"
-            }
-            ActionRow {
-              rowIndex: 2
-              iconText: "󰇚"
-              title: "Official download page"
-              subtitle: "Open Proton's Linux download and documentation"
-            }
-            ActionRow {
-              rowIndex: 3
-              iconText: "󰋖"
-              title: "Help & security"
-              subtitle: "Proton setup, syncing, backup, and Linux support"
+            foreground: root.foreground
+            placeholderText: "Search issuer or account  ·  /"
+            onTextChanged: root.selectedIndex = 0
+            onAccepted: keyCatcher.forceActiveFocus()
+            Keys.onEscapePressed: function(event) {
+              text = ""
+              keyCatcher.forceActiveFocus()
+              event.accepted = true
             }
           }
 
           PanelSeparator { width: parent.width; foreground: root.foreground }
 
           Column {
+            id: codeColumn
+            visible: root.ready
             width: parent.width
-            spacing: Style.space(6)
+            spacing: Style.space(8)
 
-            PanelSectionHeader {
-              text: "VAULT ISOLATION"
-              foreground: root.foreground
-              fontFamily: root.fontFamily
+            Repeater {
+              model: root.filteredEntries
+              CodeRow {
+                required property var modelData
+                required property int index
+                entry: modelData
+                rowIndex: index
+              }
             }
+
+            Text {
+              visible: root.filteredEntries.length === 0
+              width: parent.width
+              textFormat: Text.PlainText
+              text: searchField.text === "" ? "No authenticator codes" : "No matching codes"
+              color: root.dim
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.body
+              horizontalAlignment: Text.AlignHCenter
+              topPadding: Style.space(18)
+              bottomPadding: Style.space(18)
+            }
+          }
+
+          Column {
+            visible: !root.ready
+            width: parent.width
+            spacing: Style.space(10)
 
             Text {
               width: parent.width
               textFormat: Text.PlainText
-              text: "Your login, storage key, TOTP seeds, and codes stay inside Proton Authenticator. This unsandboxed shell plugin never reads the vault or clipboard."
+              text: authenticator.state === "needs_login"
+                ? "Sign in through the pinned Proton helper once. Normal code access stays in this popup."
+                : (authenticator.locked
+                  ? "The helper is locked. Unlock it to reveal your codes."
+                  : "The pinned Proton helper is not available yet.")
               color: root.dim
               font.family: root.fontFamily
               font.pixelSize: Style.font.bodySmall
               wrapMode: Text.WordWrap
+              horizontalAlignment: Text.AlignHCenter
             }
 
-            Text {
+            Button {
               width: parent.width
-              textFormat: Text.PlainText
-              text: "Right-click the bar icon to open or focus the app directly."
-              color: root.dim
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.caption
-              wrapMode: Text.WordWrap
+              text: authenticator.locked ? "Unlock helper" : "Sign in with Proton"
+              foreground: root.foreground
+              onClicked: authenticator.launchLogin()
+            }
+
+            Button {
+              width: parent.width
+              text: "Review pinned source"
+              foreground: root.foreground
+              onClicked: authenticator.openHelperSource()
             }
           }
 
-          Column {
+          PanelSeparator { width: parent.width; foreground: root.foreground }
+
+          Text {
             width: parent.width
-            spacing: Style.space(2)
-
-            Text {
-              width: parent.width
-              textFormat: Text.PlainText
-              text: "j/k navigate  ·  enter select  ·  o open  ·  r refresh"
-              color: root.dim
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.caption
-              horizontalAlignment: Text.AlignHCenter
-            }
-
-            Text {
-              width: parent.width
-              textFormat: Text.PlainText
-              text: "d download  ·  s support"
-              color: root.dim
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.caption
-              horizontalAlignment: Text.AlignHCenter
-            }
+            textFormat: Text.PlainText
+            text: "j/k select  ·  enter/c copy  ·  / search  ·  r refresh  ·  l lock"
+            color: root.dim
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+            horizontalAlignment: Text.AlignHCenter
+            wrapMode: Text.WordWrap
           }
 
           Item { width: 1; height: Style.space(2) }
@@ -277,17 +301,15 @@ Panel {
     }
   }
 
-  component ActionRow: CursorSurface {
-    id: actionRow
+  component CodeRow: CursorSurface {
+    id: codeRow
+    required property var entry
     required property int rowIndex
-    required property string iconText
-    required property string title
-    required property string subtitle
 
     width: parent ? parent.width : implicitWidth
-    hasCursor: root.cursorActive && root.actionIndex === rowIndex
+    hasCursor: root.cursorActive && root.selectedIndex === rowIndex
     foreground: root.foreground
-    implicitHeight: rowContent.implicitHeight + Style.spacing.rowPaddingX
+    implicitHeight: rowContent.implicitHeight + Style.space(18)
 
     MouseArea {
       anchors.fill: parent
@@ -295,51 +317,88 @@ Panel {
       cursorShape: Qt.PointingHandCursor
       onEntered: {
         root.cursorActive = true
-        root.actionIndex = actionRow.rowIndex
+        root.selectedIndex = codeRow.rowIndex
       }
-      onClicked: root.activateAction(actionRow.rowIndex)
+      onClicked: authenticator.copyCode(codeRow.entry.id)
     }
 
-    RowLayout {
+    Column {
       id: rowContent
       anchors.left: parent.left
       anchors.right: parent.right
       anchors.verticalCenter: parent.verticalCenter
-      anchors.leftMargin: Style.space(10)
-      anchors.rightMargin: Style.space(10)
-      spacing: Style.space(10)
+      anchors.leftMargin: Style.space(12)
+      anchors.rightMargin: Style.space(12)
+      spacing: Style.space(5)
 
-      Text {
-        textFormat: Text.PlainText
-        text: actionRow.iconText
-        color: root.foreground
-        font.family: root.fontFamily
-        font.pixelSize: Style.font.icon
-        Layout.alignment: Qt.AlignVCenter
-      }
+      RowLayout {
+        width: parent.width
+        spacing: Style.space(8)
 
-      ColumnLayout {
-        Layout.fillWidth: true
-        spacing: Style.space(1)
-
-        Text {
-          textFormat: Text.PlainText
+        ColumnLayout {
           Layout.fillWidth: true
-          text: actionRow.title
-          color: root.foreground
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.body
-          elide: Text.ElideRight
+          spacing: 0
+          Text {
+            Layout.fillWidth: true
+            textFormat: Text.PlainText
+            text: codeRow.entry.issuer || codeRow.entry.name
+            color: root.foreground
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.body
+            elide: Text.ElideRight
+          }
+          Text {
+            Layout.fillWidth: true
+            textFormat: Text.PlainText
+            text: codeRow.entry.name
+            color: root.dim
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+            elide: Text.ElideRight
+          }
         }
 
         Text {
           textFormat: Text.PlainText
+          text: codeRow.entry.code
+          color: root.foreground
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.title
+          font.letterSpacing: Style.space(1)
+          Layout.alignment: Qt.AlignVCenter
+        }
+      }
+
+      RowLayout {
+        width: parent.width
+        spacing: Style.space(8)
+        Rectangle {
           Layout.fillWidth: true
-          text: actionRow.subtitle
+          implicitHeight: Style.space(2)
+          radius: height / 2
+          color: root.dim
+          opacity: 0.25
+          Rectangle {
+            width: parent.width * Math.max(0, Math.min(1,
+              Model.remainingSeconds(codeRow.entry.validUntil, authenticator.now) / codeRow.entry.period))
+            height: parent.height
+            radius: parent.radius
+            color: root.foreground
+          }
+        }
+        Text {
+          textFormat: Text.PlainText
+          text: Model.remainingSeconds(codeRow.entry.validUntil, authenticator.now) + "s"
           color: root.dim
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
-          elide: Text.ElideRight
+        }
+        Text {
+          textFormat: Text.PlainText
+          text: "next " + codeRow.entry.nextCode
+          color: root.dim
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
         }
       }
     }

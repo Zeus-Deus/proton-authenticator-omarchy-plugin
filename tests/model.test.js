@@ -55,6 +55,73 @@ test('parseClients rejects a spoofed address even when the title matches', () =>
   assert.deepEqual(M.parseClients(clients), { running: false, address: '', title: '' });
 });
 
+test('parseHelperSnapshot accepts bounded official-core code rows', () => {
+  const raw = JSON.stringify({
+    v: 1,
+    id: 'request',
+    ok: true,
+    state: 'ready',
+    locked: false,
+    synced: true,
+    account: 'user@example.test',
+    generation: 7,
+    now: 59,
+    entries: [{
+      id: 'fixture-rfc6238',
+      name: 'test',
+      issuer: 'RFC6238',
+      type: 'Totp',
+      code: '94287082',
+      nextCode: '37359152',
+      period: 30,
+      validUntil: 60,
+    }],
+  });
+  assert.deepEqual(M.parseHelperSnapshot(raw), {
+    ok: true,
+    state: 'ready',
+    locked: false,
+    synced: true,
+    account: 'user@example.test',
+    generation: 7,
+    now: 59,
+    entries: [{
+      id: 'fixture-rfc6238',
+      name: 'test',
+      issuer: 'RFC6238',
+      type: 'Totp',
+      code: '94287082',
+      nextCode: '37359152',
+      period: 30,
+      validUntil: 60,
+    }],
+    error: '',
+  });
+});
+
+test('parseHelperSnapshot rejects malformed codes, ids, and oversized responses', () => {
+  const malicious = JSON.stringify({
+    v: 1, ok: true, state: 'ready', now: 1,
+    entries: [
+      { id: '../bad', name: 'bad', issuer: 'x', type: 'Totp', code: '123456', nextCode: '654321', period: 30, validUntil: 30 },
+      { id: 'good', name: 'bad code', issuer: 'x', type: 'Totp', code: '12 3456', nextCode: '654321', period: 30, validUntil: 30 },
+    ],
+  });
+  assert.deepEqual(M.parseHelperSnapshot(malicious).entries, []);
+  assert.equal(M.parseHelperSnapshot('x'.repeat(M.MAX_HELPER_BYTES + 1)).ok, false);
+});
+
+test('filterEntries searches sanitized issuer/name and remainingSeconds clamps', () => {
+  const entries = [
+    { id: '1', name: 'Alex', issuer: 'GitHub' },
+    { id: '2', name: 'Work', issuer: 'Proton' },
+  ];
+  assert.deepEqual(M.filterEntries(entries, 'git').map((row) => row.id), ['1']);
+  assert.deepEqual(M.filterEntries(entries, 'alex').map((row) => row.id), ['1']);
+  assert.equal(M.remainingSeconds(60, 59), 1);
+  assert.equal(M.remainingSeconds(60, 61), 0);
+});
+
 test('launchArgs executes the discovered binary directly and optionally applies the documented GPU workaround', () => {
   assert.deepEqual(M.launchArgs('/opt/ProtonAuthenticator.AppImage', false), ['/opt/ProtonAuthenticator.AppImage']);
   assert.deepEqual(M.launchArgs('/opt/ProtonAuthenticator.AppImage', true), [

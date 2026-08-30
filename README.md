@@ -1,138 +1,95 @@
-# Proton Authenticator Companion for Omarchy Quattro
+# Proton Authenticator for Omarchy Quattro
 
-A native Omarchy bar widget that opens and focuses **Proton's official Linux
-Authenticator app** while keeping your 2FA vault out of the unsandboxed
-`omarchy-shell` process.
+A panel-native Omarchy bar widget for searching, viewing, and copying Proton
+Authenticator codes.
 
-> Independent companion project. Not affiliated with or endorsed by Proton AG
-> or Omarchy. “Proton” and “Proton Authenticator” are used nominatively to
-> identify the app this plugin launches.
+> Independent community integration. Not affiliated with or endorsed by Proton
+> AG or Omarchy. “Proton” and “Proton Authenticator” identify the compatible
+> service and upstream open-source client.
 
-## Why it is a companion, not a second authenticator
+## Development status
 
-Proton already ships a Linux Authenticator with Proton-account sync,
-end-to-end encryption, offline code generation, import/export, and app lock.[1][3][16]
-Its production desktop window is content-protected.[9]
+This is currently a **development preview**, not a real-account release.
 
-The desktop source exposes no supported CLI, deep link, or IPC command for
-listing/copying codes.[9] Its item database is encrypted and the storage key
-lives in the OS keyring.[11][12] Proton user keys only live in app memory.[13]
-Reading those private files or reimplementing Proton login would weaken the
-security boundary the official app deliberately provides.
+Completed and tested:
 
-Therefore this plugin only:
+- Quattro popup, search, keyboard/mouse selection, current and next codes;
+- bounded line-delimited JSON over a user-owned Unix socket;
+- helper client with no password/token/secret/code in argv;
+- copy requests by opaque item ID;
+- official `@protontech/authenticator-rust-core` v2.0.0 code generation;
+- all six RFC 6238 SHA-1 vectors;
+- deterministic popup fixture (`94287082`, then `37359152`);
+- `0700` runtime directory and `0600` socket.
 
-- detects the official executable;
-- shows whether its protected window is open;
-- opens or focuses it using safe argv arrays;
-- offers Proton's official download/help pages;
-- optionally launches a **prompting**, user-local installer for Proton's signed
-  AppImage from Proton's signed updater metadata;[7][8]
-- supports Proton's documented DMA-BUF workaround for Linux white screens.[15]
+Still in progress:
 
-It never reads Proton session data, IndexedDB, keyring entries, TOTP seeds,
-generated codes, logs, or clipboard contents.
+- the production helper patch in the pinned Proton WebClients fork;
+- official Proton login, encrypted sync, lock, and clipboard integration;
+- a human real-account acceptance test.
 
-## Requirements
+Do not use the fixture with real secrets. The plugin will not be published as a
+finished authenticator until the production helper and real-account handoff pass.
 
-- Omarchy Quattro with schema-version-1 bar-widget support;
-- Hyprland (`hyprctl`) for open-window detection and focusing;
-- x86_64 for the currently published official Proton AppImage;
-- `python-cryptography` only when using the optional signed-AppImage installer.
+## Architecture
 
-If Proton Authenticator is already available as `proton-authenticator` in your
-login `PATH`, the installer dependency is not needed.
+Quickshell cannot safely host Proton's web frontend: importing `QtWebEngine`
+crashes the current Quickshell process before QML loads. Proton also exposes no
+supported Authenticator CLI or public sync API.
 
-## Install the plugin
+The selected design therefore has two processes:
 
-```bash
-omarchy plugin add https://github.com/Zeus-Deus/proton-authenticator-omarchy-plugin --enable --yes
-```
+1. **Pinned Proton helper (GPL-3)** — forked from Proton's open-source
+   `WebClients` Authenticator at the exact commit in
+   [`helper/proton-helper.lock.json`](helper/proton-helper.lock.json). It owns
+   Proton login, session/key storage, encrypted sync, TOTP/Steam generation,
+   lock state, and clipboard writes.
+2. **Omarchy popup (MIT)** — shows bounded current/next code rows and sends only
+   opaque item IDs for copy. It never receives passwords, auth tokens, encrypted
+   entry secrets, storage keys, or Proton user keys.
 
-For local development:
+A temporary helper window is allowed for first login/unlock. Normal use happens
+inside the Quattro popup; it does not open the full Authenticator app.
 
-```bash
-omarchy plugin add "$PWD" --enable --yes
-```
+## Intended use
 
-The panel's **Install official AppImage** action opens a terminal. The installer:
+- Left-click: open the popup.
+- Type `/`: focus search.
+- `j` / `k`: select a code.
+- Enter or `c`: ask the helper to copy the selected code.
+- `r`: refresh.
+- `l`: lock and clear visible rows.
+- Each row shows the current code, next code, and remaining seconds.
 
-1. fetches Proton's official `latest.json`;
-2. allows only `https://proton.me/download/authenticator/linux/*.AppImage`;
-3. verifies the `ED` minisign/Tauri signature with Proton's pinned updater key
-   (Ed25519 over BLAKE2b-512, including the trusted-comment signature);
-4. installs atomically to
-   `~/.local/opt/proton-authenticator/ProtonAuthenticator.AppImage`;
-5. creates `~/.local/bin/proton-authenticator`.
-
-It is **not** an auto-updater, never uses `sudo`, shows the version/source/target,
-and defaults to **No**.
-
-## Use
-
-- Left-click bar icon: panel
-- Right-click bar icon: open/focus Proton Authenticator
-- Middle-click: refresh status
-- Panel keys: `j/k`, Enter, `o` open, `r` refresh, `d` download, `s` support
-
-Sign in to your Proton account **inside the official app** to sync codes from
-iPhone to Linux. Proton says Linux/Windows/Android sync requires a Proton
-account; account-less local TOTP use is also supported.[1][3][4]
-
-The widget's status means only “official executable detected” and “matching
-protected window open.” Proton exposes no supported lock/sync/vault status API,
-so the widget never claims that the app is signed in, unlocked, or synchronized.
-
-## Settings
-
-- **Status refresh interval** — active only while the panel is open.
-- **Disable DMA-BUF rendering** — launches with
-  `WEBKIT_DISABLE_DMABUF_RENDERER=1`, Proton's documented workaround for a
-  white window on some Linux/NVIDIA setups.[15]
-
-## Development and verification
+## Development verification
 
 ```bash
-node --test tests/model.test.js tests/qml_contract.test.js
-python3 -m unittest tests/test_installer.py -v
+npm ci --prefix helper --ignore-scripts --no-audit --no-fund
+node --test tests/model.test.js tests/qml_contract.test.js tests/helper.integration.test.js
+python3 -m py_compile scripts/helper_client.py
 qmllint -I /usr/share/omarchy/shell Service.qml AuthenticatorIcon.qml
 omarchy plugin validate .
 omarchy-restart-shell
 qs log -p /usr/share/omarchy/shell --tail 60
-omarchy-shell proton-authenticator-companion status
+omarchy-shell proton-authenticator status
 ```
 
-The standalone linter exits 255 without diagnostics on `Panel.qml` because it
+Standalone `qmllint` exits 255 without diagnostics on `Panel.qml` because it
 cannot resolve Omarchy's injected `qs.Ui` / `qs.Commons` types. The manifest
-validator plus a real shell restart/log check are the authoritative panel gate.
+validator, real shell restart, IPC status, and shell log are the panel gate.
 
-## Security properties
+## Pinned sources
 
-See [SECURITY.md](SECURITY.md). The short version:
+- Proton WebClients upstream: https://github.com/ProtonMail/WebClients
+- Auditable fork: https://github.com/Zeus-Deus/WebClients
+- Official core package: `@protontech/authenticator-rust-core@2.0.0`
+- Exact source commit and npm integrity: `helper/proton-helper.lock.json`
+- Proton Authenticator: https://proton.me/authenticator
+- Proton Authenticator source application:
+  https://github.com/ProtonMail/WebClients/tree/main/applications/authenticator
 
-- plugin code is unsandboxed, so no vault material enters it;
-- every child command is an argv array except a fixed literal used only to
-  resolve the executable from PATH;
-- window addresses are accepted only as `0x[0-9A-Fa-f]+`;
-- external JSON is size-capped and parsed fail-closed;
-- no secrets in argv/environment/logs;
-- no background download or update.
+## Licensing
 
-## Sources
-
-[1] https://proton.me/authenticator
-[3] https://proton.me/support/get-started-proton-authenticator
-[4] https://proton.me/support/proton-authenticator-faqs
-[7] https://raw.githubusercontent.com/ProtonMail/WebClients/main/applications/authenticator/src-tauri/tauri.conf.json
-[8] https://proton.me/download/authenticator/linux/latest.json
-[9] https://raw.githubusercontent.com/ProtonMail/WebClients/main/applications/authenticator/src-tauri/src/lib.rs
-[11] https://raw.githubusercontent.com/ProtonMail/WebClients/main/applications/authenticator/src-tauri/src/storage_key.rs
-[12] https://raw.githubusercontent.com/ProtonMail/WebClients/main/applications/authenticator/src/lib/db/db.ts
-[13] https://raw.githubusercontent.com/ProtonMail/WebClients/main/applications/authenticator/src/lib/auth/service.ts
-[15] https://proton.me/support/authenticator-linux-issue
-[16] https://raw.githubusercontent.com/ProtonMail/WebClients/main/applications/authenticator/me.proton.Authenticator.metainfo.xml
-
-## License
-
-Plugin code: MIT. Proton Authenticator is a separate GPL-3.0 application from
-Proton AG and is not bundled in this repository.
+The Quattro plugin and protocol client are MIT. The helper fork and any Proton
+Authenticator-derived code remain GPL-3 under Proton's upstream license. Proton
+artwork and application binaries are not bundled in this repository.

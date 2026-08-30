@@ -1,62 +1,62 @@
 # Security
 
-## Trust boundary
+## Development warning
 
-Omarchy Quattro plugins execute unsandboxed inside the long-running shell.
-Proton Authenticator, by contrast, encrypts item records, puts the local storage
-key in Secret Service/keyring, retains Proton user keys only in its own memory,
-and marks its production window as content-protected.
+The panel-native release is not complete. The deterministic fixture contains
+only the public RFC 6238 test secret and must never be used with real accounts.
+Real Proton login is not claimed until the pinned production helper is built and
+human-tested.
 
-This plugin treats the official app as the security boundary and does not cross
-it.
+## Process boundary
 
-## Explicit non-goals
+Omarchy plugins execute unsandboxed inside the long-running shell. The plugin
+therefore does not implement Proton authentication, sync, decryption, storage,
+TOTP generation, or clipboard writes.
 
-The plugin does **not**:
+The separate GPL-3 helper derived from Proton's open-source Authenticator owns:
 
-- authenticate to Proton or implement Proton's private sync API;
-- read Authenticator IndexedDB, preferences, sessions, logs, or keyring entries;
-- decrypt, generate, display, search, or copy TOTP/Steam codes;
-- import/export authenticator vaults;
-- inspect screenshots or scrape the protected application window;
-- pass passwords, tokens, seeds, or codes in argv or environment variables;
-- auto-install or auto-update software in the background.
+- Proton login and session refresh;
+- OS-keyring/storage-key access;
+- encrypted entry synchronization and decryption;
+- current/next code generation using Proton's official Rust core;
+- lock/logout state;
+- clipboard write and conditional expiry.
 
-## External processes
+The QML process receives bounded display rows because the user explicitly
+requires visible codes in the popup. Closing or locking must clear those rows.
 
-Complete execution inventory:
+## Unix-socket contract
 
-| Command | Purpose | Inputs |
-|---|---|---|
-| `bash -lc <fixed literal>` | Resolve `proton-authenticator` from PATH or the fixed user-local install path | No untrusted input |
-| `hyprctl -j clients` | Observe whether the protected app window exists | Parsed as bounded, attacker-controlled JSON |
-| `hyprctl dispatch focuswindow address:<hex>` | Focus a validated window address | `0x[0-9A-Fa-f]+` only |
-| `[binary]` | Launch the discovered official app | Absolute, control-free path only |
-| `env WEBKIT_DISABLE_DMABUF_RENDERER=1 [binary]` | Optional Proton-documented Linux workaround | Same validated path |
-| `omarchy-launch-browser <fixed HTTPS URL>` | Open official Proton pages | Fixed literals only |
-| `omarchy-launch-terminal -- python3 <fixed installer path>` | Let the user explicitly run the prompting installer | Fixed path only |
+- runtime directory mode: `0700`;
+- socket mode: `0600`;
+- production helper must verify peer UID with `SO_PEERCRED`;
+- protocol: one bounded line-delimited JSON request and response;
+- request operations: `status`, `snapshot`, `copy`, `lock`;
+- copy carries only an opaque validated item ID;
+- responses are capped at 1 MiB and 200 rows;
+- metadata and codes are sanitized and validated fail-closed;
+- generation IDs prevent stale post-lock responses from repopulating rows.
 
-No command contains vault material.
+## Explicit prohibitions
 
-## Signed AppImage installer
+- no password, 2FA login code, token, TOTP seed, generated code, or key in argv;
+- no credentials or vault material in `shell.json`, logs, notifications, IPC
+  status, environment variables, or crash messages;
+- no direct reads of Proton IndexedDB/keyring from QML;
+- no private Proton API implementation in QML;
+- no background runtime downloads or unpinned helper updates;
+- no title-only window or helper identity matching.
 
-`scripts/install_official_appimage.py`:
+## Clipboard
 
-- accepts only the official Proton updater endpoint and download path;
-- caps metadata at 1 MiB and the artifact at 300 MiB;
-- supports only x86_64, the platform currently published in Proton's metadata;
-- verifies the minisign `ED` artifact signature using Ed25519 over a streaming
-  BLAKE2b-512 digest;
-- verifies the global signature over the trusted comment;
-- pins Proton's public updater key from the official Tauri configuration;
-- uses atomic replacement and installs without root;
-- is invoked only in a visible terminal and defaults to cancellation.
+Production copy happens in the helper, not QML. The helper must mark clipboard
+content sensitive when supported and clear after a short bounded TTL only if the
+clipboard still contains the code it wrote, so it never deletes newer user data.
+Clipboard-manager retention must be documented and tested separately.
 
-Running it again is a deliberate manual update, never an opening-panel side
-effect.
+## Source pinning
 
-## Reporting
-
-Report vulnerabilities privately to the repository owner before public
-publication. Proton Authenticator vulnerabilities belong in Proton's security
-program, not this companion repository.
+`helper/proton-helper.lock.json` pins the exact Proton WebClients commit and the
+official core npm package integrity. Open source enables review; it is not by
+itself proof of safety. Updates require a diff review, cryptographic integrity
+update, and the full test/live-acceptance suite.

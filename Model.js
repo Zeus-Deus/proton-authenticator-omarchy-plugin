@@ -7,6 +7,8 @@
 // detect/focus/launch the official content-protected application.
 
 var MAX_RESPONSE_BYTES = 256 * 1024;
+var MAX_HELPER_BYTES = 1024 * 1024;
+var MAX_HELPER_ENTRIES = 200;
 var MAX_TEXT = 160;
 
 function sanitizeText(value, limit) {
@@ -68,6 +70,98 @@ function parseClients(text) {
   return none;
 }
 
+function safeHelperCode(value, type) {
+  var code = String(value || "");
+  if (type === "Steam") return /^[23456789BCDFGHJKMNPQRTVWXY]{5}$/.test(code) ? code : "";
+  return /^\d{6,10}$/.test(code) ? code : "";
+}
+
+function emptyHelperSnapshot(error) {
+  return {
+    ok: false,
+    state: "unavailable",
+    locked: false,
+    synced: false,
+    account: "",
+    generation: 0,
+    now: 0,
+    entries: [],
+    error: sanitizeText(error || "Helper unavailable", 160)
+  };
+}
+
+function parseHelperSnapshot(text) {
+  var raw = String(text || "");
+  if (raw === "" || raw.length > MAX_HELPER_BYTES) return emptyHelperSnapshot("Invalid helper response");
+
+  var data;
+  try { data = JSON.parse(raw); } catch (e) { return emptyHelperSnapshot("Invalid helper response"); }
+  if (!data || typeof data !== "object" || data.v !== 1 || data.ok !== true)
+    return emptyHelperSnapshot(data && data.error ? data.error : "Helper unavailable");
+
+  var allowedStates = { ready: true, locked: true, needs_login: true, unavailable: true, error: true };
+  var state = String(data.state || "unavailable");
+  if (!allowedStates[state]) state = "error";
+  var now = Math.max(0, Math.floor(Number(data.now) || 0));
+  var generation = Math.max(0, Math.floor(Number(data.generation) || 0));
+  var values = data.entries instanceof Array ? data.entries : [];
+  var entries = [];
+
+  for (var i = 0; i < values.length && entries.length < MAX_HELPER_ENTRIES; i++) {
+    var value = values[i];
+    if (!value || typeof value !== "object") continue;
+    var id = String(value.id || "");
+    var type = value.type === "Steam" ? "Steam" : (value.type === "Totp" ? "Totp" : "");
+    var code = safeHelperCode(value.code, type);
+    var nextCode = safeHelperCode(value.nextCode, type);
+    var period = Math.floor(Number(value.period) || 0);
+    var validUntil = Math.floor(Number(value.validUntil) || 0);
+    if (!/^[A-Za-z0-9._:-]{1,128}$/.test(id) || type === "" || code === "" || nextCode === "") continue;
+    if (period < 15 || period > 120 || validUntil < 0) continue;
+    entries.push({
+      id: id,
+      name: sanitizeText(value.name || "Unnamed", 80),
+      issuer: sanitizeText(value.issuer || "", 80),
+      type: type,
+      code: code,
+      nextCode: nextCode,
+      period: period,
+      validUntil: validUntil
+    });
+  }
+
+  return {
+    ok: true,
+    state: state,
+    locked: data.locked === true,
+    synced: data.synced === true,
+    account: sanitizeText(data.account || "", 120),
+    generation: generation,
+    now: now,
+    entries: entries,
+    error: sanitizeText(data.error || "", 160)
+  };
+}
+
+function filterEntries(entries, query) {
+  var values = entries instanceof Array ? entries : [];
+  var needle = sanitizeText(query || "", 80).toLowerCase();
+  if (needle === "") return values.slice(0, MAX_HELPER_ENTRIES);
+  var result = [];
+  for (var i = 0; i < values.length && result.length < MAX_HELPER_ENTRIES; i++) {
+    var row = values[i] || {};
+    var haystack = (String(row.name || "") + " " + String(row.issuer || "")).toLowerCase();
+    if (haystack.indexOf(needle) !== -1) result.push(row);
+  }
+  return result;
+}
+
+function remainingSeconds(validUntil, now) {
+  var end = Math.floor(Number(validUntil) || 0);
+  var current = Math.floor(Number(now) || 0);
+  return Math.max(0, end - current);
+}
+
 function launchArgs(binaryPath, gpuWorkaround) {
   var binary = safeBinaryPath(binaryPath);
   if (binary === "") return [];
@@ -93,12 +187,18 @@ function heroMeta(state) {
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     MAX_RESPONSE_BYTES: MAX_RESPONSE_BYTES,
+    MAX_HELPER_BYTES: MAX_HELPER_BYTES,
+    MAX_HELPER_ENTRIES: MAX_HELPER_ENTRIES,
     sanitizeText: sanitizeText,
     safeBinaryPath: safeBinaryPath,
     safeWindowAddress: safeWindowAddress,
     parseJson: parseJson,
     isAuthenticatorClient: isAuthenticatorClient,
     parseClients: parseClients,
+    safeHelperCode: safeHelperCode,
+    parseHelperSnapshot: parseHelperSnapshot,
+    filterEntries: filterEntries,
+    remainingSeconds: remainingSeconds,
     launchArgs: launchArgs,
     focusArgs: focusArgs,
     heroMeta: heroMeta

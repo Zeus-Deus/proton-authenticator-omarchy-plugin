@@ -1,51 +1,51 @@
-# Proton Authenticator Companion — Agent Guide
+# Proton Authenticator for Omarchy — Agent Guide
+
+## Current state
+
+Development preview. The popup and deterministic official-core fixture work;
+the pinned real Proton helper is not complete and real-account support must not
+be claimed.
 
 ## Architecture
 
-- `Panel.qml`: Quattro UI, cursor/keyboard handling, IPC, no secret access.
-- `Service.qml`: executable/window detection and safe launch/focus only.
-- `Model.js`: all pure parsing, validation and argv builders; Node-testable.
-- `scripts/install_official_appimage.py`: prompting, signed, user-local installer.
-- `tests/`: Node model tests and Python installer/crypto tests.
+- `Panel.qml`: popup, search, countdown, code display, opaque-ID actions.
+- `Service.qml`: bounded helper client process only.
+- `Model.js`: pure response validation/filter/countdown helpers.
+- `scripts/helper_client.py`: bounded Unix-socket client.
+- `helper/fixture-server.mjs`: test-only RFC fixture using Proton's official
+  `@protontech/authenticator-rust-core` package.
+- `helper/proton-helper.lock.json`: exact upstream commit/package integrity.
+- Production helper: GPL-3 patch in `Zeus-Deus/WebClients`.
 
 ## Hard rules
 
-1. Never read Proton Authenticator's local database, browser profile, keyring,
-   auth/session state, logs, or clipboard.
-2. Never implement or reverse-engineer Proton account login/sync in this plugin.
-3. Never display or generate codes in `omarchy-shell`; launch the protected app.
-4. Secrets never enter argv, environment variables, shell config, logs, or QML.
-5. External data is bounded, sanitized, and parsed fail-closed.
-6. Commands use argv arrays. The one shell command is a fixed literal for PATH
-   resolution and may not receive interpolated values.
-7. The AppImage installer must verify both minisign signatures before install,
-   remain user-local, visible, prompting, and non-updating.
-8. No Proton artwork is bundled. The generic shield/key glyph avoids implying
-   endorsement or importing third-party assets.
+1. Never put passwords, login 2FA, tokens, seeds, keys, or generated codes in
+   argv, environment variables, shell settings, logs, notifications, or status
+   IPC.
+2. Visible codes may exist in QML memory only while the panel/helper is unlocked;
+   lock/logout/socket loss clears rows immediately.
+3. Copy sends an opaque item ID. The helper writes and conditionally expires the
+   clipboard.
+4. Production socket parent is `0700`, socket `0600`, and helper verifies peer
+   UID with `SO_PEERCRED`.
+5. Bound response bytes, row count, and field lengths; sanitize controls/bidi;
+   discard stale generations.
+6. Never install or launch `helper/fixture-server.mjs` in production.
+7. Never claim real Proton login/sync works without a human real-account test.
+8. Update pinned Proton source only after diff review and full regression gates.
 
 ## Gates
 
 ```bash
-node --test tests/model.test.js tests/qml_contract.test.js
-python3 -m unittest tests/test_installer.py -v
+npm ci --prefix helper --ignore-scripts --no-audit --no-fund
+node --test tests/model.test.js tests/qml_contract.test.js tests/helper.integration.test.js
+python3 -m py_compile scripts/helper_client.py
 qmllint -I /usr/share/omarchy/shell Service.qml AuthenticatorIcon.qml
 omarchy plugin validate .
 omarchy-restart-shell
 qs log -p /usr/share/omarchy/shell --tail 60
-omarchy-shell proton-authenticator-companion status
+omarchy-shell proton-authenticator status
 ```
 
-`Panel.qml` exits 255 without diagnostics in standalone `qmllint` because the
-linter cannot resolve Omarchy's injected `qs.Ui`/`qs.Commons` types. Validate it
-with `omarchy plugin validate`, a real shell restart, IPC status, and shell logs.
-Panel QML edits require `omarchy-restart-shell`.
-
-## Manual acceptance
-
-- Missing state offers a visible, confirmation-default-No installer.
-- Installed/stopped state launches the official app.
-- Running state focuses the existing window without starting a duplicate.
-- Right-click bar icon launches/focuses directly.
-- The optional DMA-BUF setting passes only Proton's documented env flag.
-- Closing the panel stops status polling.
-- No Proton password/code is needed for tests; use the real signed app logged out.
+`Panel.qml` standalone lint is not authoritative because injected `qs.Ui` and
+`qs.Commons` types are unresolved. Validate it in the real shell.

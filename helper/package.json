@@ -1,0 +1,13 @@
+{
+  "name": "proton-authenticator-omarchy-fixture",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "license": "GPL-3.0-only",
+  "scripts": {
+    "fixture": "node --experimental-wasm-modules fixture-server.mjs --fixture"
+  },
+  "dependencies": {
+    "@protontech/authenticator-rust-core": "2.0.0"
+  }
+}
