@@ -35,7 +35,7 @@ Panel {
     ? (authenticator.running ? "Focus Authenticator" : "Open Authenticator")
     : "Install official AppImage"
   readonly property string primarySubtitle: authenticator.installed
-    ? "Login and copy codes inside Proton's protected window"
+    ? "Login and copy codes in Proton's protected app"
     : "User-local install · signed by Proton · confirmation required"
 
   function moveCursor(dx, dy) {
@@ -246,16 +246,32 @@ Panel {
             }
           }
 
-          Text {
+          Column {
             width: parent.width
-            textFormat: Text.PlainText
-            text: "j/k navigate  ·  enter select  ·  o open  ·  r refresh  ·  d download  ·  s support"
-            color: root.dim
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.caption
-            horizontalAlignment: Text.AlignHCenter
-            wrapMode: Text.WordWrap
+            spacing: Style.space(2)
+
+            Text {
+              width: parent.width
+              textFormat: Text.PlainText
+              text: "j/k navigate  ·  enter select  ·  o open  ·  r refresh"
+              color: root.dim
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+              horizontalAlignment: Text.AlignHCenter
+            }
+
+            Text {
+              width: parent.width
+              textFormat: Text.PlainText
+              text: "d download  ·  s support"
+              color: root.dim
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+              horizontalAlignment: Text.AlignHCenter
+            }
           }
+
+          Item { width: 1; height: Style.space(2) }
         }
       }
     }
