@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.zeus-deus.proton-authenticator",
+  "name": "Proton Authenticator Companion",
+  "version": "0.1.0",
+  "author": "Zeus-Deus",
+  "license": "MIT",
+  "description": "Open and focus Proton's official content-protected Authenticator app from the Omarchy bar without exposing 2FA secrets to the shell.",
+  "kinds": ["bar-widget"],
+  "entryPoints": { "barWidget": "Panel.qml" },
+  "barWidget": {
+    "displayName": "Proton Authenticator",
+    "description": "Secure companion for Proton's official Linux Authenticator app.",
+    "category": "Security",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "refreshIntervalSec": 3,
+      "gpuWorkaround": false
+    },
+    "schema": [
+      {
+        "key": "refreshIntervalSec",
+        "type": "integer",
+        "label": "Status refresh interval (seconds)",
+        "description": "How often the open panel checks whether Proton Authenticator is running.",
+        "min": 2,
+        "max": 60,
+        "step": 1,
+        "defaultValue": 3
+      },
+      {
+        "key": "gpuWorkaround",
+        "type": "boolean",
+        "label": "Disable DMA-BUF rendering",
+        "description": "Apply Proton's documented WEBKIT_DISABLE_DMABUF_RENDERER=1 workaround when the app opens to a white window.",
+        "defaultValue": false
+      }
+    ]
+  }
+}
