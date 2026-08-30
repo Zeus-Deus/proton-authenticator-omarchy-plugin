@@ -59,7 +59,7 @@ Item {
   function launchLogin() {
     // Fixed helper executable and fixed mode. Credentials are entered only in
     // the helper's Proton UI and never cross argv, QML properties, or shell IPC.
-    Quickshell.execDetached([helperBinary, "--login"])
+    Quickshell.execDetached([helperBinary, "--background", "--login"])
     actionStatus = "Opening secure Proton sign-in"
   }
 
@@ -120,7 +120,7 @@ Item {
         root.state = "locked"
         root.locked = true
         root.entries = []
-        root.actionStatus = "Authenticator locked"
+        root.actionStatus = "Codes hidden"
       }
       root.refresh()
     }

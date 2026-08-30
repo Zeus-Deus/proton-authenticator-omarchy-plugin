@@ -30,7 +30,7 @@ Panel {
     if (!authenticator.checked) return "Connecting to secure helper…"
     if (!authenticator.available) return authenticator.error || "Secure helper unavailable"
     if (authenticator.state === "needs_login") return "Sign in to enable encrypted sync"
-    if (authenticator.locked) return "Locked"
+    if (authenticator.locked) return "Codes hidden"
     if (authenticator.error !== "") return authenticator.error
     var count = authenticator.entries.length
     return count + (count === 1 ? " code" : " codes") + (authenticator.synced ? " · synced" : " · local")
@@ -264,7 +264,7 @@ Panel {
               text: authenticator.state === "needs_login"
                 ? "Sign in through the pinned Proton helper once. Normal code access stays in this popup."
                 : (authenticator.locked
-                  ? "The helper is locked. Unlock it to reveal your codes."
+                  ? "Codes are hidden. Show them again through the pinned helper."
                   : "The pinned Proton helper is not available yet.")
               color: root.dim
               font.family: root.fontFamily
@@ -275,7 +275,7 @@ Panel {
 
             Button {
               width: parent.width
-              text: authenticator.locked ? "Unlock helper" : "Sign in with Proton"
+              text: authenticator.locked ? "Show codes" : "Sign in with Proton"
               foreground: root.foreground
               onClicked: authenticator.launchLogin()
             }
@@ -294,8 +294,8 @@ Panel {
             width: parent.width
             textFormat: Text.PlainText
             text: root.ready
-              ? "j/k select  ·  enter/c copy  ·  / search  ·  r refresh  ·  l lock"
-              : (authenticator.locked ? "enter/l unlock  ·  r refresh" : "enter sign in  ·  r refresh")
+              ? "j/k select  ·  enter/c copy  ·  / search  ·  r refresh  ·  l hide"
+              : (authenticator.locked ? "enter/l show codes  ·  r refresh" : "enter sign in  ·  r refresh")
             color: root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
