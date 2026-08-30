@@ -59,7 +59,9 @@ Item {
   }
 
   function refresh() {
-    if (!checked) { start(); return }
+    // Re-resolve while missing so a completed, user-confirmed install is picked
+    // up by the next panel tick without requiring an omarchy-shell restart.
+    if (!installed) { start(); return }
     refreshClients()
   }
 
