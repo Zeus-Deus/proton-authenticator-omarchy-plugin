@@ -27,6 +27,24 @@ test('parseClients finds the official Proton Authenticator window', () => {
   });
 });
 
+test('parseClients accepts the official AppImage window class observed on Hyprland', () => {
+  const clients = JSON.stringify([
+    { address: '0xC0FFEE', class: 'Proton-authenticator', title: 'Proton Authenticator' },
+  ]);
+  assert.deepEqual(M.parseClients(clients), {
+    running: true,
+    address: '0xC0FFEE',
+    title: 'Proton Authenticator',
+  });
+});
+
+test('parseClients rejects title-only window spoofing', () => {
+  const clients = JSON.stringify([
+    { address: '0xBAD', class: 'attacker-window', title: 'Proton Authenticator' },
+  ]);
+  assert.deepEqual(M.parseClients(clients), { running: false, address: '', title: '' });
+});
+
 test('parseClients fails closed on malformed or oversized data', () => {
   assert.deepEqual(M.parseClients('not json'), { running: false, address: '', title: '' });
   assert.deepEqual(M.parseClients('x'.repeat(M.MAX_RESPONSE_BYTES + 1)), { running: false, address: '', title: '' });

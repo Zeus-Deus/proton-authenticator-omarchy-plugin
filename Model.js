@@ -41,10 +41,12 @@ function parseJson(text) {
 function isAuthenticatorClient(client) {
   if (!client || typeof client !== "object") return false;
   var className = String(client.class || client.initialClass || "").toLowerCase();
-  var title = String(client.title || client.initialTitle || "").toLowerCase();
+  // Known official Linux identifiers: Flatpak/reverse-DNS plus the Tauri
+  // AppImage classes observed with and without a separator. Never trust a
+  // title-only match; any local process can choose that title.
   return className === "me.proton.authenticator"
     || className === "proton authenticator"
-    || title === "proton authenticator";
+    || className === "proton-authenticator";
 }
 
 function parseClients(text) {
