@@ -17,7 +17,7 @@ Completed and tested:
 - bounded line-delimited JSON over a user-owned Unix socket;
 - helper client with no password/token/secret/code in argv;
 - copy requests by opaque item ID;
-- official `@protontech/authenticator-rust-core` v2.0.0 code generation;
+- official `@protontech/authenticator-rust-core` v0.28.8 code generation;
 - all six RFC 6238 SHA-1 vectors;
 - deterministic popup fixture (`94287082`, then `37359152`);
 - `0700` runtime directory and `0600` socket.

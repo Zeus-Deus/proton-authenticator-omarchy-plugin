@@ -8,6 +8,6 @@
     "fixture": "node --experimental-wasm-modules fixture-server.mjs --fixture"
   },
   "dependencies": {
-    "@protontech/authenticator-rust-core": "2.0.0"
+    "@protontech/authenticator-rust-core": "0.28.8"
   }
 }

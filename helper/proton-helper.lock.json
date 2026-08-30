@@ -7,7 +7,7 @@
   },
   "authenticatorRustCore": {
     "package": "@protontech/authenticator-rust-core",
-    "version": "2.0.0",
-    "integrity": "sha512-0F9fllHruP0V/mrqUe1Laxc79wl6nBi6i5YJceNzLCZvE05waH11X3VCyp5OPbQu/bnoMvayShsOmWiF/5J12A=="
+    "version": "0.28.8",
+    "integrity": "sha512-1pjTHiWq+ok5BOJdnckBC9kEyvIb7H5t7/XoqYVov0RhX1+b0PPatiMlXem3pZDLE3n8TKRP567vGnnKHStAjw=="
   }
 }

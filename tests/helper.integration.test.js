@@ -55,7 +55,7 @@ test('official-core fixture serves bounded RFC codes over a private Unix socket'
   assert.equal(snapshot.status, 0, snapshot.stdout + snapshot.stderr);
   const payload = JSON.parse(snapshot.stdout);
   assert.equal(payload.ok, true);
-  assert.equal(payload.coreVersion, '2.0.0');
+  assert.equal(payload.coreVersion, '0.28.8');
   assert.equal(payload.entries.length, 1);
   assert.equal(payload.entries[0].code, '94287082');
   assert.equal(payload.entries[0].nextCode, '37359152');
