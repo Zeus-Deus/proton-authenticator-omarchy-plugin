@@ -11,14 +11,14 @@ Authenticator app** while keeping your 2FA vault out of the unsandboxed
 ## Why it is a companion, not a second authenticator
 
 Proton already ships a Linux Authenticator with Proton-account sync,
-end-to-end encryption, offline code generation, import/export, app lock, and a
-content-protected window.[1][2]
+end-to-end encryption, offline code generation, import/export, and app lock.[1][3][16]
+Its production desktop window is content-protected.[9]
 
 The desktop source exposes no supported CLI, deep link, or IPC command for
-listing/copying codes. Its item database is encrypted, the storage key lives in
-the OS keyring, and Proton user keys only live in app memory.[3][4][5] Reading
-those private files or reimplementing Proton login would weaken the security
-boundary the official app deliberately provides.
+listing/copying codes.[9] Its item database is encrypted and the storage key
+lives in the OS keyring.[11][12] Proton user keys only live in app memory.[13]
+Reading those private files or reimplementing Proton login would weaken the
+security boundary the official app deliberately provides.
 
 Therefore this plugin only:
 
@@ -27,8 +27,8 @@ Therefore this plugin only:
 - opens or focuses it using safe argv arrays;
 - offers Proton's official download/help pages;
 - optionally launches a **prompting**, user-local installer for Proton's signed
-  AppImage;
-- supports Proton's documented DMA-BUF workaround for Linux white screens.[6]
+  AppImage from Proton's signed updater metadata;[7][8]
+- supports Proton's documented DMA-BUF workaround for Linux white screens.[15]
 
 It never reads Proton session data, IndexedDB, keyring entries, TOTP seeds,
 generated codes, logs, or clipboard contents.
@@ -67,14 +67,14 @@ and defaults to **No**.
 
 Sign in to your Proton account **inside the official app** to sync codes from
 iPhone to Linux. Proton says Linux/Windows/Android sync requires a Proton
-account; account-less local TOTP use is also supported.[2][7]
+account; account-less local TOTP use is also supported.[1][3][4]
 
 ## Settings
 
 - **Status refresh interval** — active only while the panel is open.
 - **Disable DMA-BUF rendering** — launches with
   `WEBKIT_DISABLE_DMABUF_RENDERER=1`, Proton's documented workaround for a
-  white window on some Linux/NVIDIA setups.[6]
+  white window on some Linux/NVIDIA setups.[15]
 
 ## Development and verification
 
@@ -104,13 +104,17 @@ See [SECURITY.md](SECURITY.md). The short version:
 
 ## Sources
 
-1. https://proton.me/authenticator
-2. https://proton.me/support/get-started-proton-authenticator
-3. https://raw.githubusercontent.com/ProtonMail/WebClients/main/applications/authenticator/src-tauri/src/lib.rs
-4. https://raw.githubusercontent.com/ProtonMail/WebClients/main/applications/authenticator/src-tauri/src/storage_key.rs
-5. https://raw.githubusercontent.com/ProtonMail/WebClients/main/applications/authenticator/src/lib/db/db.ts
-6. https://proton.me/support/authenticator-linux-issue
-7. https://proton.me/support/proton-authenticator-faqs
+[1] https://proton.me/authenticator
+[3] https://proton.me/support/get-started-proton-authenticator
+[4] https://proton.me/support/proton-authenticator-faqs
+[7] https://raw.githubusercontent.com/ProtonMail/WebClients/main/applications/authenticator/src-tauri/tauri.conf.json
+[8] https://proton.me/download/authenticator/linux/latest.json
+[9] https://raw.githubusercontent.com/ProtonMail/WebClients/main/applications/authenticator/src-tauri/src/lib.rs
+[11] https://raw.githubusercontent.com/ProtonMail/WebClients/main/applications/authenticator/src-tauri/src/storage_key.rs
+[12] https://raw.githubusercontent.com/ProtonMail/WebClients/main/applications/authenticator/src/lib/db/db.ts
+[13] https://raw.githubusercontent.com/ProtonMail/WebClients/main/applications/authenticator/src/lib/auth/service.ts
+[15] https://proton.me/support/authenticator-linux-issue
+[16] https://raw.githubusercontent.com/ProtonMail/WebClients/main/applications/authenticator/me.proton.Authenticator.metainfo.xml
 
 ## License
 
