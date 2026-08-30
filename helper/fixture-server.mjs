@@ -24,7 +24,8 @@ const fixtureEntry = entry_from_uri(
   'otpauth://totp/RFC6238:test?secret=GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ&issuer=RFC6238&algorithm=SHA1&digits=8&period=30'
 );
 fixtureEntry.id = 'fixture-rfc6238';
-const generation = 1;
+let generation = 1;
+let isLocked = false;
 
 fs.mkdirSync(runtimeDir, { recursive: true, mode: 0o700 });
 fs.chmodSync(runtimeDir, 0o700);
@@ -35,6 +36,19 @@ function response(id, body) {
 }
 
 function snapshot(id) {
+  if (isLocked) {
+    return response(id, {
+      ok: true,
+      state: 'locked',
+      locked: true,
+      synced: false,
+      account: 'RFC fixture',
+      generation,
+      now: Number(fixedTime),
+      coreVersion: library_version(),
+      entries: [],
+    });
+  }
   const codes = generate_code(fixtureEntry, fixedTime);
   const period = Number(fixtureEntry.period || 30);
   const now = Number(fixedTime);
@@ -65,10 +79,15 @@ function handle(request) {
   if (request.v !== 1 || !id) return response(id, { ok: false, error: 'invalid_request' });
   if (request.op === 'status' || request.op === 'snapshot') return snapshot(id);
   if (request.op === 'copy') {
+    if (isLocked) return response(id, { ok: false, error: 'locked', generation });
     if (request.itemId !== fixtureEntry.id) return response(id, { ok: false, error: 'not_found' });
     return response(id, { ok: true, copied: true, generation });
   }
-  if (request.op === 'lock') return response(id, { ok: true, state: 'locked', locked: true, generation: generation + 1 });
+  if (request.op === 'lock') {
+    isLocked = true;
+    generation++;
+    return response(id, { ok: true, state: 'locked', locked: true, generation });
+  }
   return response(id, { ok: false, error: 'unsupported_operation' });
 }
 

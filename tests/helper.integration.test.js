@@ -68,4 +68,14 @@ test('official-core fixture serves bounded RFC codes over a private Unix socket'
   const rejected = runClient(socketPath, ['copy', '../bad']);
   assert.equal(rejected.status, 1);
   assert.equal(JSON.parse(rejected.stdout).ok, false);
+
+  const locked = runClient(socketPath, ['lock']);
+  assert.equal(locked.status, 0);
+  assert.equal(JSON.parse(locked.stdout).locked, true);
+  const afterLock = runClient(socketPath, ['snapshot']);
+  assert.equal(afterLock.status, 0);
+  assert.equal(JSON.parse(afterLock.stdout).state, 'locked');
+  assert.deepEqual(JSON.parse(afterLock.stdout).entries, []);
+  const copyWhileLocked = runClient(socketPath, ['copy', 'fixture-rfc6238']);
+  assert.equal(copyWhileLocked.status, 1);
 });
