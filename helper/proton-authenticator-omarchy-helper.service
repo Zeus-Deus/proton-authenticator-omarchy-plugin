@@ -10,5 +10,60 @@ Restart=on-failure
 RestartSec=3
 Environment=WEBKIT_DISABLE_DMABUF_RENDERER=1
 
+# The helper holds decrypted vault entries, session material, and keyring-derived
+# keys in memory. A core dump writes all of it to persistent storage, and the
+# default UMask creates its files group- and world-readable.
+LimitCORE=0
+UMask=0077
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+# Everything the app actually writes: its XDG config/data/cache directories and
+# the runtime directory holding the private helper socket. ProtectSystem=strict
+# makes /run read-only, so %t must be listed explicitly.
+ReadWritePaths=%h/.config/me.proton.authenticator %h/.local/share/me.proton.authenticator %h/.cache/me.proton.authenticator %t
+PrivateTmp=yes
+ProtectProc=invisible
+ProcSubset=pid
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectHostname=yes
+ProtectClock=yes
+LockPersonality=yes
+RestrictRealtime=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+CapabilityBoundingSet=
+SystemCallArchitectures=native
+# @sandbox and @mount are required: WebKitGTK and GTK's glycin image loaders
+# both spawn bubblewrap children that need seccomp/namespace and mount calls.
+# Verified with a real GUI launch (window mapped, then returned to hidden
+# background) — not just a headless start.
+SystemCallFilter=@system-service @sandbox @mount
+SystemCallFilter=~@debug @swap @reboot @module @obsolete @cpu-emulation @raw-io
+
+# Deliberately NOT set. Each one below was measured against this binary; do not
+# add them to improve the systemd-analyze score.
+#
+#   RestrictSUIDSGID    Breaks bubblewrap, so it breaks both WebKitGTK's own
+#                       sandbox and GTK's glycin image loader. The helper aborts
+#                       during startup with a GTK icon-loader assertion.
+#                       Reproduced on systemd 261 with:
+#                         systemd-run --user --wait --pipe -p RestrictSUIDSGID=yes \
+#                           bwrap --unshare-all --ro-bind /usr /usr --dev /dev /usr/bin/true
+#                       -> bwrap: Can't open source /usr: Function not implemented
+#                       The same command without the directive exits 0.
+#   RestrictNamespaces  Disables WebKitGTK's bubblewrap sandbox for
+#                       WebKitWebProcess — a net security loss.
+#   MemoryDenyWriteExecute
+#                       Breaks WebKit outright; JavaScriptCore's JIT needs
+#                       W^X-toggleable mappings.
+#   PrivateUsers        Same namespace problem, and breaks keyring/DBus access.
+#   PrivateNetwork      The helper is a network client by design.
+#   PrivateDevices      Removes /dev/dri, breaking GPU rendering.
+#   SystemCallFilter    Untested against the GPU/DRM ioctls WebKit issues.
+
 [Install]
 WantedBy=default.target
