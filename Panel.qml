@@ -76,6 +76,7 @@ Panel {
     if (opened) {
       selectedIndex = 0
       cursorActive = false
+      panelFlick.contentY = 0
       authenticator.refresh()
       Qt.callLater(function() { keyCatcher.forceActiveFocus() })
     } else {
@@ -215,7 +216,10 @@ Panel {
             width: parent.width
             foreground: root.foreground
             placeholderText: "Search issuer or account  ·  /"
-            onTextChanged: root.selectedIndex = 0
+            onTextChanged: {
+              root.selectedIndex = 0
+              panelFlick.contentY = 0
+            }
             onAccepted: keyCatcher.forceActiveFocus()
             Keys.onEscapePressed: function(event) {
               text = ""

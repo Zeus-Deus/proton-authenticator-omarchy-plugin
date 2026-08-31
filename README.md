@@ -23,8 +23,8 @@ Completed and tested:
 - `0700` runtime directory, `0600` socket, and `SO_PEERCRED` UID check;
 - local RFC TOTP entry flowed Proton DB → helper → Quattro popup;
 - real current/next codes matched an independent RFC HMAC calculation;
-- copy by opaque ID wrote the expected code and conditionally expired it after
-  20 seconds;
+- copy by opaque ID wrote the expected code; the helper's foreground clipboard
+  owner expires after 20 seconds without clearing newer external clipboard data;
 - deterministic official-core TOTP (`94287082`, then `37359152`) and Steam
   (`PV9M4`, then `B26KJ`) fixtures.
 

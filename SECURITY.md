@@ -49,12 +49,12 @@ requires visible codes in the popup. Closing or locking must clear those rows.
 
 ## Clipboard
 
-Production copy happens in the helper, not QML. The helper writes through stdin
-and clears after 20 seconds only if the clipboard still contains the code it
-wrote; copying the same current code again renews the 20-second window. It never
-deletes newer user data. That copy/expiry path was live-tested with the public
-RFC entry. Clipboard-manager history may retain copied values and must be treated
-as outside the helper's control.
+Production copy happens in the helper, not QML. The helper owns one
+`wl-copy --foreground --sensitive` process and terminates that exact process
+after 20 seconds, on replacement, or on privacy lock. External clipboard owners
+are never cleared. Copying the same current code again replaces the owner and
+renews the 20-second window. Clipboard-manager history may retain copied values
+and must be treated as outside the helper's control.
 
 The background helper disables Proton application logging entirely. Normal
 foreground Proton launches retain upstream logging behavior.

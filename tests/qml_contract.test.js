@@ -29,6 +29,11 @@ test('the panel renders current and next codes from validated helper rows', () =
   assert.match(panel, /remainingSeconds/);
 });
 
+test('reopen and search reset the scroll position', () => {
+  assert.match(panel, /if \(opened\) \{[\s\S]{0,180}panelFlick\.contentY = 0/);
+  assert.match(panel, /onTextChanged:[\s\S]{0,100}panelFlick\.contentY = 0/);
+});
+
 test('ready local state exposes a Proton sync sign-in action', () => {
   assert.match(panel, /Sign in to Proton sync/);
   assert.match(panel, /!authenticator\.synced/);
@@ -61,4 +66,8 @@ test('transient action feedback expires instead of becoming stale state', () => 
 test('login handoff launches a fixed helper executable without credentials', () => {
   assert.match(service, /proton-authenticator-omarchy-helper/);
   assert.doesNotMatch(service, /launchLogin[\s\S]{0,500}(password|token|secret)/i);
+});
+
+test('review action opens the exact pinned helper commit', () => {
+  assert.match(service, /WebClients\/commit\/f4793fcfdf15afefe1788a21df71399f729cd265/);
 });

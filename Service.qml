@@ -88,7 +88,10 @@ Item {
   }
 
   function openHelperSource() {
-    Quickshell.execDetached(["omarchy-launch-browser", "https://github.com/Zeus-Deus/WebClients"])
+    Quickshell.execDetached([
+      "omarchy-launch-browser",
+      "https://github.com/Zeus-Deus/WebClients/commit/f4793fcfdf15afefe1788a21df71399f729cd265"
+    ])
   }
 
   function applySnapshot(raw) {

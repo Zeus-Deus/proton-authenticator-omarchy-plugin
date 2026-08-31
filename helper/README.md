@@ -21,6 +21,7 @@ Until a reviewed helper release artifact is published, install a locally built
 binary explicitly:
 
 ```bash
+mise exec node@24.18.0 -- corepack yarn workspace proton-authenticator build:omarchy-helper
 install -Dm755 /path/to/WebClients/applications/authenticator/src-tauri/target/release/proton-authenticator \
   ~/.local/opt/proton-authenticator-omarchy-helper/proton-authenticator
 ln -sfn ~/.local/opt/proton-authenticator-omarchy-helper/proton-authenticator \
