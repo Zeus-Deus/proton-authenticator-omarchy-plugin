@@ -102,3 +102,16 @@ test('sanitizeText strips invisible, filler, and tag code points that survive \\
   // Real text is untouched.
   assert.equal(M.sanitizeText('Proton Mail · üñî 中文'), 'Proton Mail · üñî 中文');
 });
+
+test('the response cap counts UTF-8 bytes, not UTF-16 code units', () => {
+  const payload = (name) => JSON.stringify({
+    v: 1, ok: true, state: 'ready', generation: 1, now: 0, account: name, entries: [],
+  });
+  // Two-byte characters: under the UTF-16 length cap but over the byte cap.
+  const oversize = payload('é'.repeat(M.MAX_HELPER_BYTES - 200));
+  assert.ok(oversize.length <= M.MAX_HELPER_BYTES, 'precondition: passes a UTF-16 length check');
+  assert.ok(Buffer.byteLength(oversize, 'utf8') > M.MAX_HELPER_BYTES, 'precondition: exceeds the byte cap');
+  assert.equal(M.parseHelperSnapshot(oversize).ok, false);
+  // An ASCII payload inside the cap still parses.
+  assert.equal(M.parseHelperSnapshot(payload('user@example.test')).ok, true);
+});

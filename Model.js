@@ -93,7 +93,10 @@ function emptyHelperSnapshot(error) {
 
 function parseHelperSnapshot(text) {
   var raw = String(text || "");
-  if (raw === "" || raw.length > MAX_HELPER_BYTES) return emptyHelperSnapshot("Invalid helper response");
+  // The cap is UTF-8 bytes, matching the documented limit and the Python
+  // client's own byte cap. raw.length counts UTF-16 units, which accepted a
+  // 1.2 MB non-ASCII payload past a nominal 1 MiB limit.
+  if (raw === "" || utf8ByteLength(raw) > MAX_HELPER_BYTES) return emptyHelperSnapshot("Invalid helper response");
 
   var data;
   try { data = JSON.parse(raw); } catch (e) { return emptyHelperSnapshot("Invalid helper response"); }
@@ -173,6 +176,7 @@ if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     MAX_HELPER_BYTES: MAX_HELPER_BYTES,
     MAX_HELPER_ENTRIES: MAX_HELPER_ENTRIES,
+    utf8ByteLength: utf8ByteLength,
     sanitizeText: sanitizeText,
 
     safeHelperCode: safeHelperCode,
