@@ -83,3 +83,22 @@ test('filterEntries searches sanitized issuer/name and remainingSeconds clamps',
   assert.equal(M.remainingSeconds(60, 59), 1);
   assert.equal(M.remainingSeconds(60, 61), 0);
 });
+
+test('sanitizeText strips invisible, filler, and tag code points that survive \\s collapsing', () => {
+  const marks = [
+    '\u00AD', '\u061C', '\u180E', '\u200B', '\u200C', '\u200D', '\u200E', '\u200F',
+    '\u202A', '\u202B', '\u202C', '\u202D', '\u202E', '\u2060', '\u2061', '\u2062',
+    '\u2063', '\u2064', '\u2066', '\u2067', '\u2068', '\u2069', '\uFEFF',
+    '\u115F', '\u1160', '\u3164', '\uFFA0', '\uFE00', '\uFE0F',
+    '\uDB40\uDC01', '\uDB40\uDC41',
+  ];
+  for (const mark of marks) {
+    assert.equal(M.sanitizeText(`Git${mark}Hub`), 'GitHub', `not stripped: ${escape(mark)}`);
+  }
+  // The exact spoofing string from the audit must not survive.
+  assert.equal(M.sanitizeText('GitHub\u2063\u3164\u00ad\udb40\udc41Fake'), 'GitHubFake');
+  // Two rows that differ only by invisible marks must collapse to one label.
+  assert.equal(M.sanitizeText('GitHub\u3164'), M.sanitizeText('GitHub'));
+  // Real text is untouched.
+  assert.equal(M.sanitizeText('Proton Mail · üñî 中文'), 'Proton Mail · üñî 中文');
+});

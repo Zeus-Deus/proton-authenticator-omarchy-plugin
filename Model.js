@@ -56,8 +56,15 @@ function truncateUtf8(value, maxBytes) {
 function sanitizeText(value, limit) {
   var s = String(value === undefined || value === null ? "" : value);
   s = s.replace(/[\u0000-\u001F\u007F-\u009F]/g, " ");
-  s = s.replace(/[\u061C\u200E\u200F\u202A-\u202E\u2060\u2066-\u2069]/g, "");
-  s = s.replace(/[\u200B-\u200D\uFEFF]/g, "");
+  // Invisible, bidi, and filler code points that render as nothing or as blank
+  // width, so two rows can otherwise display an identical issuer. Mirrors the
+  // Rust-side bounded_text set: soft hyphen, bidi marks and isolates, invisible
+  // operators, Hangul fillers, variation selectors, and Unicode tag characters.
+  // `\s+` collapsing does not catch these — U+3164 and U+180E are not JS \s.
+  s = s.replace(/[\u00AD\u061C\u180E\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\uFEFF]/g, "");
+  s = s.replace(/[\u115F\u1160\u3164\uFFA0]/g, "");
+  s = s.replace(/[\uFE00-\uFE0F]/g, "");
+  s = s.replace(/\uDB40[\uDC00-\uDC7F]/g, "");
   s = s.replace(/\s+/g, " ").replace(/^ +| +$/g, "");
   var max = limit === undefined ? MAX_TEXT : Math.max(0, Number(limit) || 0);
   return truncateUtf8(s, max);
