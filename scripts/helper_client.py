@@ -15,9 +15,12 @@ import secrets
 import socket
 import stat
 import sys
+import time
 from pathlib import Path
 
 MAX_RESPONSE_BYTES = 1024 * 1024
+RECV_TIMEOUT_SECONDS = 2.0
+TOTAL_DEADLINE_SECONDS = 5.0
 ITEM_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 OPS = {"status", "snapshot", "copy", "lock", "unlock"}
 
@@ -82,13 +85,24 @@ def request(op: str, item_id: str = "") -> dict:
     path = socket_path()
     verify_socket(path)
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
-        client.settimeout(2.0)
+        # settimeout() bounds each individual recv, so a server dripping bytes
+        # resets it forever. Hold a wall-clock deadline across the whole
+        # exchange as well.
+        deadline = time.monotonic() + TOTAL_DEADLINE_SECONDS
+        client.settimeout(RECV_TIMEOUT_SECONDS)
         client.connect(str(path))
         client.sendall(encoded)
         chunks: list[bytes] = []
         size = 0
         while True:
-            chunk = client.recv(65536)
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise RuntimeError("helper response timeout")
+            client.settimeout(min(RECV_TIMEOUT_SECONDS, remaining))
+            try:
+                chunk = client.recv(65536)
+            except socket.timeout:
+                raise RuntimeError("helper response timeout") from None
             if not chunk:
                 break
             size += len(chunk)

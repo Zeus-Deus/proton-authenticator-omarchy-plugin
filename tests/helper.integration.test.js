@@ -189,6 +189,34 @@ test('the client refuses a hijacked socket path before sending a request', async
   assert.match(JSON.parse(viaFile.stdout).error, /not a socket/);
 });
 
+test('the client bounds the whole exchange, not each recv', async (t) => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'proton-auth-slow-test-'));
+  fs.chmodSync(base, 0o700);
+  t.after(() => fs.rmSync(base, { recursive: true, force: true }));
+  const slowSocket = path.join(base, 'helper.sock');
+
+  // Drips one byte every 500 ms and never sends a newline: each recv succeeds
+  // well inside the per-recv timeout, so only a wall-clock deadline stops it.
+  const timers = [];
+  const slow = net.createServer((client) => {
+    client.on('data', () => {
+      for (let i = 0; i < 60; i++) {
+        timers.push(setTimeout(() => { try { client.write('x'); } catch {} }, 500 * (i + 1)));
+      }
+    });
+  });
+  await new Promise((resolve) => slow.listen(slowSocket, resolve));
+  fs.chmodSync(slowSocket, 0o600);
+  t.after(() => { timers.forEach(clearTimeout); slow.close(); });
+
+  const started = Date.now();
+  const result = await runClientAsync(slowSocket, ['snapshot']);
+  const elapsed = (Date.now() - started) / 1000;
+  assert.equal(result.status, 1);
+  assert.match(JSON.parse(result.stdout).error, /timeout/);
+  assert.ok(elapsed < 8, `expected a bounded exchange, took ${elapsed}s`);
+});
+
 test('the test fixture server never ships inside the helper tree', () => {
   assert.equal(fs.existsSync(path.join(root, 'helper', 'fixture-server.mjs')), false);
   assert.equal(fs.existsSync(fixture), true);
