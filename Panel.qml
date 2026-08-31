@@ -24,16 +24,21 @@ Panel {
   readonly property color dim: Qt.darker(foreground, 1.55)
   readonly property color hoverFill: Style.hoverFillFor(foreground, Color.accent)
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
-  readonly property bool ready: authenticator.available && authenticator.state === "ready" && !authenticator.locked
+  readonly property bool ready: authenticator.available && authenticator.state === "ready"
+    && !authenticator.locked && !authenticator.hidden && !authenticator.paused
 
   function heroMeta() {
-    if (!authenticator.checked) return "Connecting to secure helper…"
-    if (!authenticator.available) return authenticator.error || "Secure helper unavailable"
-    if (authenticator.state === "needs_login") return "Sign in to enable encrypted sync"
-    if (authenticator.locked) return "Codes hidden"
-    if (authenticator.error !== "") return authenticator.error
-    var count = authenticator.entryCount
-    return count + (count === 1 ? " code" : " codes") + (authenticator.synced ? " · synced" : " · local")
+    return Model.statusMessage({
+      checked: authenticator.checked,
+      available: authenticator.available,
+      hidden: authenticator.hidden,
+      paused: authenticator.paused,
+      state: authenticator.state,
+      locked: authenticator.locked,
+      synced: authenticator.synced,
+      entryCount: authenticator.entryCount,
+      error: authenticator.error
+    })
   }
 
   function selectedEntry() {
@@ -96,7 +101,7 @@ Panel {
   // Quickshell IPC is reachable by any process running as this user; it carries
   // no authentication and `manageIpc: false` adds none. Only verbs that move
   // toward the safe state or expose no code material are published here.
-  // Releasing the privacy latch, copying a code, and summoning Proton's login
+  // Resuming code rendering, copying a code, and summoning Proton's login
   // window all require focused input in the panel itself.
   IpcHandler {
     target: root.ipcTarget
@@ -113,6 +118,8 @@ Panel {
         available: authenticator.available,
         state: authenticator.state,
         locked: authenticator.locked,
+        hidden: authenticator.hidden,
+        paused: authenticator.paused,
         synced: authenticator.synced,
         count: authenticator.entryCount,
         error: authenticator.error
@@ -127,7 +134,7 @@ Panel {
     text: "󰒃"
     foreground: root.foreground
     active: root.ready
-    tooltipText: authenticator.locked ? "Proton Authenticator · locked" : "Proton Authenticator"
+    tooltipText: authenticator.hidden ? "Proton Authenticator · hidden" : "Proton Authenticator"
     onPressed: function(buttonCode) {
       if (buttonCode === Qt.MiddleButton) authenticator.refresh()
       else root.toggle()
@@ -154,7 +161,8 @@ Panel {
       }
       onActivateRequested: {
         if (root.ready) root.copySelected()
-        else if (authenticator.locked) authenticator.showCodes()
+        else if (authenticator.hidden) authenticator.showCodes()
+        else if (authenticator.locked || authenticator.paused) authenticator.refresh()
         else authenticator.launchLogin()
       }
       onCloseRequested: root.close()
@@ -163,10 +171,12 @@ Panel {
         if (text === "/") searchField.forceActiveFocus()
         else if (text === "r" || text === "R") authenticator.refresh()
         else if (text === "c" || text === "C") root.copySelected()
-        else if (text === "l" || text === "L") {
-          if (authenticator.locked) authenticator.showCodes()
-          else authenticator.lock()
+        else if (text === "l") {
+          // Panel-local privacy toggle: it never asks the helper to forget.
+          if (authenticator.hidden) authenticator.showCodes()
+          else authenticator.hideCodes()
         }
+        else if (text === "L") authenticator.lock()
       }
 
       Flickable {
@@ -278,11 +288,12 @@ Panel {
             Text {
               width: parent.width
               textFormat: Text.PlainText
-              text: authenticator.state === "needs_login"
-                ? "Sign in through the pinned Proton helper once. Normal code access stays in this popup."
-                : (authenticator.locked
-                  ? "Codes are hidden. Show them again through the pinned helper."
-                  : "The pinned Proton helper is not available yet.")
+              text: Model.hintMessage({
+                hidden: authenticator.hidden,
+                paused: authenticator.paused,
+                state: authenticator.state,
+                locked: authenticator.locked
+              })
               color: root.dim
               font.family: root.fontFamily
               font.pixelSize: Style.font.bodySmall
@@ -292,10 +303,13 @@ Panel {
 
             Button {
               width: parent.width
-              text: authenticator.locked ? "Show codes" : "Sign in with Proton"
+              text: authenticator.hidden
+                ? "Show codes in this panel"
+                : (authenticator.paused || authenticator.locked ? "Check again" : "Sign in with Proton")
               foreground: root.foreground
               onClicked: {
-                if (authenticator.locked) authenticator.showCodes()
+                if (authenticator.hidden) authenticator.showCodes()
+                else if (authenticator.paused || authenticator.locked) authenticator.refresh()
                 else authenticator.launchLogin()
               }
             }
@@ -315,7 +329,9 @@ Panel {
             textFormat: Text.PlainText
             text: root.ready
               ? "j/k select  ·  enter/c copy  ·  / search  ·  r refresh  ·  l hide"
-              : (authenticator.locked ? "enter/l show codes  ·  r refresh" : "enter sign in  ·  r refresh")
+              : (authenticator.hidden
+                ? "enter/l show codes  ·  shift+l clear helper copy"
+                : "enter sign in  ·  r refresh  ·  shift+l clear helper copy")
             color: root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption

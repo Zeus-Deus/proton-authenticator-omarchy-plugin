@@ -86,6 +86,7 @@ function emptyHelperSnapshot(error) {
     ok: false,
     state: "unavailable",
     locked: false,
+    stale: false,
     synced: false,
     account: "",
     generation: 0,
@@ -142,6 +143,10 @@ function parseHelperSnapshot(text) {
     ok: true,
     state: state,
     locked: data.locked === true,
+    // The helper expires its own snapshot: a publisher that stalled behind a
+    // hidden webview degrades `ready` to `unavailable` with no rows and sets
+    // this flag. It is transient, not breakage, and must read as such.
+    stale: data.stale === true,
     synced: data.synced === true,
     account: sanitizeText(data.account || "", 120),
     generation: generation,
@@ -189,6 +194,58 @@ function remainingSeconds(validUntil, now) {
   return Math.max(0, end - current);
 }
 
+// A snapshot the helper has expired carries no rows, so the panel must tell the
+// difference between "waiting for the app to republish" and a real failure.
+function isPaused(view) {
+  var v = view || {};
+  return v.ok === true && v.stale === true && v.state === "unavailable";
+}
+
+function parseCopyResponse(text) {
+  var data = null;
+  try { data = JSON.parse(String(text || "")); } catch (e) { data = null; }
+  var ok = !!data && typeof data === "object" && data.v === 1
+    && data.ok === true && data.copied === true;
+  var error = !ok && data && typeof data === "object" ? sanitizeText(data.error || "", 160) : "";
+  return { ok: ok, stale: error === "stale", error: error };
+}
+
+function copyStatusMessage(result) {
+  var value = result || {};
+  if (value.ok === true) return "Code copied";
+  if (value.stale === true) return "Codes paused · waiting for the helper";
+  return "Could not copy code";
+}
+
+// Panel wording. Hiding is panel-local: the helper keeps its copy of the codes
+// until its own lock clears them, so no message may imply the helper forgot
+// anything the panel merely stopped drawing.
+function statusMessage(view) {
+  var v = view || {};
+  if (v.checked !== true) return "Connecting to secure helper…";
+  if (v.hidden === true) return "Codes hidden in this panel";
+  if (v.available !== true) return sanitizeText(v.error || "", 160) || "Secure helper unavailable";
+  if (v.paused === true) return "Codes paused · waiting for the helper";
+  if (v.state === "needs_login") return "Sign in to enable encrypted sync";
+  if (v.locked === true) return "Helper copy cleared";
+  if (v.error) return sanitizeText(v.error, 160);
+  var count = Math.max(0, Math.floor(Number(v.entryCount) || 0));
+  return count + (count === 1 ? " code" : " codes") + (v.synced === true ? " · synced" : " · local");
+}
+
+function hintMessage(view) {
+  var v = view || {};
+  if (v.hidden === true)
+    return "Rows are hidden in this panel only. The helper still holds the codes until you clear its copy.";
+  if (v.paused === true)
+    return "The helper's last snapshot expired. Rows return as soon as the Proton helper publishes again.";
+  if (v.state === "needs_login")
+    return "Sign in through the pinned Proton helper once. Normal code access stays in this popup.";
+  if (v.locked === true)
+    return "The helper cleared its copy of the codes. They stay cleared until the helper restarts.";
+  return "The pinned Proton helper is not available yet.";
+}
+
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     MAX_HELPER_BYTES: MAX_HELPER_BYTES,
@@ -203,6 +260,11 @@ if (typeof module !== "undefined" && module.exports) {
     clampGeneration: clampGeneration,
     latchFloor: latchFloor,
     shouldAcceptGeneration: shouldAcceptGeneration,
-    remainingSeconds: remainingSeconds
+    remainingSeconds: remainingSeconds,
+    isPaused: isPaused,
+    parseCopyResponse: parseCopyResponse,
+    copyStatusMessage: copyStatusMessage,
+    statusMessage: statusMessage,
+    hintMessage: hintMessage
   };
 }

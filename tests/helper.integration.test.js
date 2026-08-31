@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const net = require('node:net');
+const Model = require('../Model.js');
 
 const root = path.join(__dirname, '..');
 const fixture = path.join(root, 'tests', 'fixtures', 'fixture-server.mjs');
@@ -104,13 +105,74 @@ test('official-core fixture serves bounded RFC codes over a private Unix socket'
   const copyWhileLocked = runClient(socketPath, ['copy', 'fixture-rfc6238']);
   assert.equal(copyWhileLocked.status, 1);
 
+  // The socket has no release path: `unlock` was removed from the helper and
+  // from the client's allowed ops, so it cannot even be dialled.
   const unlocked = runClient(socketPath, ['unlock']);
-  assert.equal(unlocked.status, 0);
-  assert.equal(JSON.parse(unlocked.stdout).locked, false);
-  const afterUnlock = runClient(socketPath, ['snapshot']);
-  assert.equal(afterUnlock.status, 0);
-  assert.equal(JSON.parse(afterUnlock.stdout).state, 'ready');
-  assert.equal(JSON.parse(afterUnlock.stdout).entries.length, 2);
+  assert.equal(unlocked.status, 1);
+  const unlockPayload = JSON.parse(unlocked.stdout);
+  assert.equal(unlockPayload.ok, false);
+  assert.match(unlockPayload.error, /unsupported operation/);
+  // The lock is still latched: nothing about the refusal released it.
+  const afterAttempt = runClient(socketPath, ['snapshot']);
+  assert.equal(JSON.parse(afterAttempt.stdout).state, 'locked');
+});
+
+test('an expired helper snapshot degrades to stale and refuses to copy', async (t) => {
+  const runtime = fs.mkdtempSync(path.join(os.tmpdir(), 'proton-auth-stale-test-'));
+  const socketPath = path.join(runtime, 'helper.sock');
+  const server = childProcess.spawn(process.execPath, ['--experimental-wasm-modules', fixture, '--fixture'], {
+    cwd: root,
+    env: {
+      ...process.env,
+      PROTON_AUTH_HELPER_SOCKET: socketPath,
+      PROTON_AUTH_FIXTURE: '1',
+      PROTON_AUTH_FIXTURE_TIME: '59',
+      PROTON_AUTH_FIXTURE_STALE: '1',
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  t.after(() => {
+    server.kill('SIGTERM');
+    fs.rmSync(runtime, { recursive: true, force: true });
+  });
+
+  await new Promise((resolve, reject) => {
+    let stderr = '';
+    const timer = setTimeout(() => reject(new Error(`fixture readiness timeout: ${stderr}`)), 10000);
+    server.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+    server.once('exit', (code) => reject(new Error(`fixture exited ${code}: ${stderr}`)));
+    server.stdout.on('data', (chunk) => {
+      if (chunk.toString().includes('"ready":true')) {
+        clearTimeout(timer);
+        resolve();
+      }
+    });
+  });
+
+  // A stale `ready` snapshot must arrive as `unavailable` with no rows, so no
+  // expired code can reach the panel.
+  const snapshot = runClient(socketPath, ['snapshot']);
+  assert.equal(snapshot.status, 0, snapshot.stdout + snapshot.stderr);
+  const payload = JSON.parse(snapshot.stdout);
+  assert.equal(payload.stale, true);
+  assert.equal(payload.state, 'unavailable');
+  assert.deepEqual(payload.entries, []);
+
+  const view = Model.parseHelperSnapshot(snapshot.stdout);
+  assert.equal(Model.isPaused(view), true);
+  assert.deepEqual(view.entries, []);
+  assert.equal(Model.statusMessage({
+    checked: true, available: view.ok, paused: Model.isPaused(view), state: view.state
+  }), 'Codes paused · waiting for the helper');
+
+  // Copy is refused with the distinct stale error, not a generic failure.
+  const copied = runClient(socketPath, ['copy', 'fixture-rfc6238']);
+  assert.equal(copied.status, 1);
+  assert.equal(JSON.parse(copied.stdout).error, 'stale');
+  const result = Model.parseCopyResponse(copied.stdout);
+  assert.equal(result.stale, true);
+  assert.equal(result.ok, false);
+  assert.equal(Model.copyStatusMessage(result), 'Codes paused · waiting for the helper');
 });
 
 test('the client refuses a hijacked socket path before sending a request', async (t) => {

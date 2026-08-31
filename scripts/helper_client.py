@@ -22,7 +22,9 @@ MAX_RESPONSE_BYTES = 1024 * 1024
 RECV_TIMEOUT_SECONDS = 2.0
 TOTAL_DEADLINE_SECONDS = 5.0
 ITEM_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
-OPS = {"status", "snapshot", "copy", "lock", "unlock"}
+# `unlock` is absent by design: the helper no longer serves it, and a socket
+# release path would let any same-uid process resume publication of live codes.
+OPS = {"status", "snapshot", "copy", "lock"}
 
 
 def socket_path() -> Path:

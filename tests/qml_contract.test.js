@@ -18,7 +18,7 @@ test('every helper client spawn pins an absolute interpreter, never a PATH looku
   assert.match(service, /readonly property string pythonBinary:\s*"\/usr\/bin\/python3"/);
   assert.doesNotMatch(executableCode, /command\s*=\s*\[\s*"python3"/);
   const spawns = service.match(/command\s*=\s*\[[^\]]*\]/g) || [];
-  assert.equal(spawns.length, 4);
+  assert.equal(spawns.length, 3);
   for (const spawn of spawns) assert.match(spawn, /^command\s*=\s*\[pythonBinary,/);
 });
 
@@ -28,7 +28,6 @@ test('panel close clears rows and snapshot output is not retained in a collector
   assert.match(service, /stdout:\s*SplitParser\s*\{[\s\S]{0,180}applySnapshot/);
   assert.doesNotMatch(service, /snapshotOut|stdout:\s*StdioCollector\s*\{\s*id:\s*snapshot/);
   assert.match(service, /function clearVisibleRows\(\)[\s\S]{0,260}entries = \[\]/);
-  assert.match(service, /function clearVisibleRows\(\)[\s\S]{0,260}unlockResponse = null/);
   assert.match(service, /if \(!panelOpen && next\.ok\) return/);
 });
 
@@ -39,7 +38,7 @@ test('the privacy latch floor survives a panel close instead of resetting to zer
   assert.match(service, /function clearVisibleRows\(\)[\s\S]{0,300}generation = latchFloor/);
   // Every generation write goes through the monotonic floor.
   assert.doesNotMatch(service, /generation = Math\.floor\(Number\(response\.generation\)\)/);
-  assert.equal((service.match(/Model\.latchFloor\(/g) || []).length, 4);
+  assert.equal((service.match(/Model\.latchFloor\(/g) || []).length, 3);
 });
 
 test('the panel renders current and next codes from validated helper rows', () => {
@@ -69,9 +68,43 @@ test('QML never implements Proton auth, vault reads, or code generation', () => 
   assert.doesNotMatch(executableCode, /generateCode|generate_code|IndexedDB|keyring.*get|password|accessToken|refreshToken/i);
 });
 
-test('privacy latch restores rows through panel-focused unlock without opening Proton', () => {
-  assert.match(service, /function showCodes\(\)[\s\S]{0,220}"unlock"/);
-  assert.match(panel, /authenticator\.locked\)[\s\S]{0,100}authenticator\.showCodes\(\)/);
+test('the panel never sends a socket unlock and keeps show-codes panel-local', () => {
+  assert.doesNotMatch(executableCode, /"unlock"/);
+  assert.doesNotMatch(service, /unlockProcess|unlockResponse/);
+  // showCodes only flips local state and resumes polling; it spawns nothing.
+  const showCodes = service.match(/function showCodes\(\) \{[\s\S]*?\n  \}/)[0];
+  assert.doesNotMatch(showCodes, /command\s*=/);
+  assert.match(showCodes, /hidden = false/);
+  assert.match(showCodes, /refresh\(\)/);
+  // Hiding is local too: it must not spawn a helper request.
+  const hideCodes = service.match(/function hideCodes\(\) \{[\s\S]*?\n  \}/)[0];
+  assert.doesNotMatch(hideCodes, /command\s*=/);
+  assert.match(hideCodes, /hidden = true/);
+  // A hidden panel stops pulling live codes into this process.
+  assert.match(service, /if \(!panelOpen \|\| hidden \|\|/);
+});
+
+test('the stronger helper-side lock stays reachable and one-way', () => {
+  assert.match(service, /function lock\(\)[\s\S]{0,200}"lock"/);
+  assert.match(panel, /text === "L"\) authenticator\.lock\(\)/);
+  assert.match(panel, /text === "l"\)[\s\S]{0,200}authenticator\.hideCodes\(\)/);
+});
+
+test('stale helper snapshots surface as a paused state, not as breakage', () => {
+  assert.match(service, /property bool paused: false/);
+  assert.match(service, /paused = Model\.isPaused\(next\)/);
+  assert.match(service, /Model\.parseCopyResponse/);
+  assert.match(service, /if \(result\.stale\)[\s\S]{0,200}root\.paused = true/);
+  assert.match(panel, /!authenticator\.paused/);
+  assert.match(panel, /Model\.statusMessage\(/);
+  assert.match(panel, /Model\.hintMessage\(/);
+});
+
+test('the panel wording never claims the helper forgot codes it still holds', () => {
+  const model = fs.readFileSync(path.join(__dirname, '..', 'Model.js'), 'utf8');
+  assert.match(model, /Codes hidden in this panel/);
+  assert.match(model, /hidden in this panel only/);
+  assert.doesNotMatch(panel, /Show them again through the pinned helper/);
 });
 
 test('the IPC surface publishes only fail-safe verbs', () => {

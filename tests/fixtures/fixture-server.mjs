@@ -45,6 +45,10 @@ steamEntry.id = 'fixture-steam';
 const fixtureEntries = [totpEntry, steamEntry];
 let generation = 1;
 let isLocked = false;
+// Mirrors the helper's snapshot TTL expiring: set at startup so a test can run
+// a whole process against the degraded shape. There is no socket op for it,
+// because the production helper has none either.
+const isStale = process.env.PROTON_AUTH_FIXTURE_STALE === '1';
 
 fs.mkdirSync(runtimeDir, { recursive: true, mode: 0o700 });
 fs.chmodSync(runtimeDir, 0o700);
@@ -60,6 +64,7 @@ function snapshot(id) {
       ok: true,
       state: 'locked',
       locked: true,
+      stale: false,
       synced: false,
       account: 'RFC fixture',
       generation,
@@ -69,6 +74,21 @@ function snapshot(id) {
     });
   }
   const now = Number(fixedTime);
+  // The production helper expires its own publication: a `ready` snapshot older
+  // than its TTL degrades to `unavailable` with no rows and `stale: true`.
+  if (isStale && !isLocked) {
+    return response(id, {
+      ok: true,
+      state: 'unavailable',
+      locked: false,
+      stale: true,
+      synced: false,
+      account: 'RFC fixture',
+      generation,
+      now,
+      entries: [],
+    });
+  }
   const entries = fixtureEntries.map((entry) => {
     const codes = generate_code(entry, fixedTime);
     const period = Number(entry.period || 30);
@@ -87,6 +107,7 @@ function snapshot(id) {
     ok: true,
     state: 'ready',
     locked: false,
+    stale: false,
     synced: false,
     account: 'RFC fixture',
     generation,
@@ -101,6 +122,9 @@ function handle(request) {
   if (request.v !== 1 || !id) return response(id, { ok: false, error: 'invalid_request' });
   if (request.op === 'status' || request.op === 'snapshot') return snapshot(id);
   if (request.op === 'copy') {
+    // Staleness is checked before the lock state, matching the helper: an
+    // expired snapshot refuses the copy rather than handing out a dead code.
+    if (isStale && !isLocked) return response(id, { ok: false, error: 'stale' });
     if (isLocked) return response(id, { ok: false, error: 'locked', generation });
     if (!fixtureEntries.some((entry) => request.itemId === entry.id)) return response(id, { ok: false, error: 'not_found' });
     return response(id, { ok: true, copied: true, generation });
@@ -110,11 +134,8 @@ function handle(request) {
     generation++;
     return response(id, { ok: true, state: 'locked', locked: true, generation });
   }
-  if (request.op === 'unlock') {
-    isLocked = false;
-    generation++;
-    return response(id, { ok: true, state: 'ready', locked: false, generation });
-  }
+  // `unlock` is deliberately absent, matching the production helper: it falls
+  // through to unsupported_operation like any other unknown op.
   return response(id, { ok: false, error: 'unsupported_operation' });
 }
 

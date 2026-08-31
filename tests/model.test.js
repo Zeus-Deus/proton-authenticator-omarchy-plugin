@@ -36,6 +36,7 @@ test('parseHelperSnapshot accepts bounded official-core code rows', () => {
     ok: true,
     state: 'ready',
     locked: false,
+    stale: false,
     synced: true,
     account: 'user@example.test',
     generation: 7,
@@ -129,4 +130,93 @@ test('shouldAcceptGeneration keeps a latch floor and rejects forged counters', (
   assert.equal(M.latchFloor(9, 3), 9);
   assert.equal(M.latchFloor(3, 9), 9);
   assert.equal(M.latchFloor(0, 0), 0);
+});
+
+test('parseHelperSnapshot carries the helper staleness flag through', () => {
+  // The helper degrades an expired `ready` snapshot to `unavailable` with no
+  // rows and stale:true; the panel must be able to tell that apart from a
+  // helper that is genuinely gone.
+  const stale = M.parseHelperSnapshot(JSON.stringify({
+    v: 1, ok: true, state: 'unavailable', locked: false, stale: true,
+    synced: true, account: 'user@example.test', generation: 12, now: 100, entries: []
+  }));
+  assert.equal(stale.ok, true);
+  assert.equal(stale.stale, true);
+  assert.equal(stale.state, 'unavailable');
+  assert.deepEqual(stale.entries, []);
+  assert.equal(M.isPaused(stale), true);
+
+  // Absent, non-boolean, and false stale fields are all not-stale.
+  const fresh = M.parseHelperSnapshot(JSON.stringify({
+    v: 1, ok: true, state: 'ready', locked: false, synced: false,
+    account: '', generation: 3, now: 100, entries: []
+  }));
+  assert.equal(fresh.stale, false);
+  assert.equal(M.isPaused(fresh), false);
+  assert.equal(M.parseHelperSnapshot(JSON.stringify({
+    v: 1, ok: true, state: 'unavailable', stale: 'yes', generation: 1, now: 1, entries: []
+  })).stale, false);
+
+  // A transport failure is unavailable but not paused: the helper is absent,
+  // not merely behind, and the two must not show the same message.
+  const gone = M.parseHelperSnapshot('');
+  assert.equal(gone.ok, false);
+  assert.equal(gone.stale, false);
+  assert.equal(M.isPaused(gone), false);
+  // A locked snapshot claiming staleness is still locked, not paused.
+  assert.equal(M.isPaused({ ok: true, stale: true, state: 'locked' }), false);
+});
+
+test('parseCopyResponse distinguishes a stale refusal from a real failure', () => {
+  const ok = M.parseCopyResponse('{"v":1,"ok":true,"copied":true,"generation":4}');
+  assert.deepEqual(ok, { ok: true, stale: false, error: '' });
+  assert.equal(M.copyStatusMessage(ok), 'Code copied');
+
+  const stale = M.parseCopyResponse('{"v":1,"ok":false,"error":"stale"}');
+  assert.equal(stale.ok, false);
+  assert.equal(stale.stale, true);
+  assert.equal(M.copyStatusMessage(stale), 'Codes paused · waiting for the helper');
+
+  const locked = M.parseCopyResponse('{"v":1,"ok":false,"error":"locked"}');
+  assert.equal(locked.stale, false);
+  assert.equal(M.copyStatusMessage(locked), 'Could not copy code');
+
+  // The removed op and malformed output must never read as stale or as success.
+  const unsupported = M.parseCopyResponse('{"v":1,"ok":false,"error":"unsupported_operation"}');
+  assert.deepEqual(unsupported, { ok: false, stale: false, error: 'unsupported_operation' });
+  assert.equal(M.parseCopyResponse('not json').ok, false);
+  assert.equal(M.parseCopyResponse('').stale, false);
+  // A wrong protocol version is not a success even when it claims one.
+  assert.equal(M.parseCopyResponse('{"v":2,"ok":true,"copied":true}').ok, false);
+});
+
+test('panel wording separates panel-local hiding from a cleared helper copy', () => {
+  const base = { checked: true, available: true, state: 'ready', entryCount: 2 };
+  assert.equal(M.statusMessage(Object.assign({}, base, { synced: true })), '2 codes · synced');
+  assert.equal(M.statusMessage(Object.assign({}, base, { entryCount: 1 })), '1 code · local');
+  assert.equal(M.statusMessage({ checked: false }), 'Connecting to secure helper…');
+  assert.equal(M.statusMessage({ checked: true, available: false }), 'Secure helper unavailable');
+
+  // Hiding is local: it must not claim the helper dropped anything.
+  const hidden = M.statusMessage(Object.assign({}, base, { hidden: true }));
+  assert.equal(hidden, 'Codes hidden in this panel');
+  assert.match(M.hintMessage({ hidden: true }), /this panel only/);
+  assert.match(M.hintMessage({ hidden: true }), /helper still holds the codes/);
+
+  // Paused reads as transient, and never as an unavailable helper.
+  assert.equal(M.statusMessage(Object.assign({}, base, { state: 'unavailable', paused: true })),
+    'Codes paused · waiting for the helper');
+  assert.match(M.hintMessage({ paused: true }), /publishes again/);
+
+  // The helper-side lock is the one that really cleared the codes.
+  assert.equal(M.statusMessage(Object.assign({}, base, { state: 'locked', locked: true })),
+    'Helper copy cleared');
+  assert.match(M.hintMessage({ locked: true }), /cleared its copy/);
+  assert.match(M.hintMessage({ state: 'needs_login' }), /Sign in through the pinned Proton helper/);
+
+  // Hidden outranks every other state: a hidden panel shows nothing else.
+  assert.equal(M.statusMessage({ checked: true, hidden: true, available: false, paused: true }),
+    'Codes hidden in this panel');
+  // Status text is sanitized like every other helper-sourced string.
+  assert.equal(M.statusMessage({ checked: true, available: false, error: 'bad\u202Etext' }), 'badtext');
 });
