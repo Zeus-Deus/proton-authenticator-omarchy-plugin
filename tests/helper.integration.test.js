@@ -19,6 +19,23 @@ function runClient(socketPath, args) {
   });
 }
 
+// spawnSync blocks this process's event loop, which would stall any mock server
+// running in-process. Tests with an in-process server must use this variant.
+function runClientAsync(socketPath, args) {
+  return new Promise((resolve) => {
+    const child = childProcess.spawn('/usr/bin/python3', [client, ...args], {
+      cwd: root,
+      env: { ...process.env, PROTON_AUTH_HELPER_SOCKET: socketPath },
+      timeout: 15000,
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
+    child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+    child.on('close', (status) => resolve({ status, stdout, stderr }));
+  });
+}
+
 test('official-core fixture serves bounded RFC codes over a private Unix socket', async (t) => {
   const runtime = fs.mkdtempSync(path.join(os.tmpdir(), 'proton-auth-helper-test-'));
   const socketPath = path.join(runtime, 'helper.sock');
@@ -94,6 +111,82 @@ test('official-core fixture serves bounded RFC codes over a private Unix socket'
   assert.equal(afterUnlock.status, 0);
   assert.equal(JSON.parse(afterUnlock.stdout).state, 'ready');
   assert.equal(JSON.parse(afterUnlock.stdout).entries.length, 2);
+});
+
+test('the client refuses a hijacked socket path before sending a request', async (t) => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'proton-auth-hijack-test-'));
+  t.after(() => fs.rmSync(base, { recursive: true, force: true }));
+
+  // A real, correctly-moded socket that answers with forged rows. The attack
+  // is the path, not the server: the client must never reach this handshake.
+  const evilDir = path.join(base, 'evil');
+  fs.mkdirSync(evilDir, { mode: 0o700 });
+  const evilSocket = path.join(evilDir, 'helper.sock');
+  const forged = { v: 1, ok: true, state: 'ready', locked: false, synced: true,
+    account: 'attacker@evil.test', generation: 999999, now: 59, entries: [] };
+  const evil = net.createServer((client) => {
+    client.on('data', (chunk) => {
+      const id = JSON.parse(chunk.toString().split('\n')[0]).id;
+      client.end(JSON.stringify({ ...forged, id }) + '\n');
+    });
+  });
+  await new Promise((resolve) => evil.listen(evilSocket, resolve));
+  fs.chmodSync(evilSocket, 0o600);
+  t.after(() => evil.close());
+
+  // Control: the forged server does answer when reached directly.
+  const direct = await runClientAsync(evilSocket, ['snapshot']);
+  assert.equal(direct.status, 0);
+  assert.equal(JSON.parse(direct.stdout).account, 'attacker@evil.test');
+
+  // Case A: symlinked runtime directory pointing at the attacker directory.
+  const linkedDir = path.join(base, 'linked');
+  fs.symlinkSync(evilDir, linkedDir);
+  const viaLinkedDir = await runClientAsync(path.join(linkedDir, 'helper.sock'), ['snapshot']);
+  assert.equal(viaLinkedDir.status, 1);
+  const linkedError = JSON.parse(viaLinkedDir.stdout);
+  assert.equal(linkedError.ok, false);
+  assert.match(linkedError.error, /not a directory/);
+  assert.doesNotMatch(viaLinkedDir.stdout, /attacker@evil\.test|999999/);
+
+  // Case B: symlinked socket inside an otherwise valid owner-private directory.
+  const goodDir = path.join(base, 'good');
+  fs.mkdirSync(goodDir, { mode: 0o700 });
+  const linkedSocket = path.join(goodDir, 'helper.sock');
+  fs.symlinkSync(evilSocket, linkedSocket);
+  const viaLinkedSocket = await runClientAsync(linkedSocket, ['snapshot']);
+  assert.equal(viaLinkedSocket.status, 1);
+  assert.match(JSON.parse(viaLinkedSocket.stdout).error, /not a socket/);
+  assert.doesNotMatch(viaLinkedSocket.stdout, /attacker@evil\.test|999999/);
+
+  // Case C: a world-readable parent directory is refused.
+  const looseDir = path.join(base, 'loose');
+  fs.mkdirSync(looseDir, { mode: 0o755 });
+  const looseSocket = path.join(looseDir, 'helper.sock');
+  const loose = net.createServer(() => {});
+  await new Promise((resolve) => loose.listen(looseSocket, resolve));
+  fs.chmodSync(looseSocket, 0o600);
+  t.after(() => loose.close());
+  const viaLoose = await runClientAsync(looseSocket, ['snapshot']);
+  assert.equal(viaLoose.status, 1);
+  assert.match(JSON.parse(viaLoose.stdout).error, /not owner-private/);
+
+  // Case D: a group/other-readable socket is refused.
+  const openSocket = path.join(goodDir, 'open.sock');
+  const open = net.createServer(() => {});
+  await new Promise((resolve) => open.listen(openSocket, resolve));
+  fs.chmodSync(openSocket, 0o660);
+  t.after(() => open.close());
+  const viaOpen = await runClientAsync(openSocket, ['snapshot']);
+  assert.equal(viaOpen.status, 1);
+  assert.match(JSON.parse(viaOpen.stdout).error, /socket is not owner-private/);
+
+  // Case E: a plain file at the socket path is refused.
+  const plainFile = path.join(goodDir, 'plain.sock');
+  fs.writeFileSync(plainFile, '', { mode: 0o600 });
+  const viaFile = await runClientAsync(plainFile, ['snapshot']);
+  assert.equal(viaFile.status, 1);
+  assert.match(JSON.parse(viaFile.stdout).error, /not a socket/);
 });
 
 test('the test fixture server never ships inside the helper tree', () => {

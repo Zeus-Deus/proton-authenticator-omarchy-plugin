@@ -13,6 +13,7 @@ import os
 import re
 import secrets
 import socket
+import stat
 import sys
 from pathlib import Path
 
@@ -31,6 +32,39 @@ def socket_path() -> Path:
     return Path(runtime) / "proton-authenticator-omarchy" / "helper.sock"
 
 
+def verify_socket(path: Path) -> None:
+    """Authenticate the server before sending a request.
+
+    The helper's 0700/0600 modes and SO_PEERCRED check protect the helper from
+    clients; nothing in them protects this client from a hijacked socket path.
+    Without these checks a symlinked runtime directory serves forged rows and a
+    forged high generation that permanently wedges the panel's staleness floor.
+    Errors are fixed identifiers and never disclose the inspected path.
+    """
+    uid = os.geteuid()
+    try:
+        parent = os.lstat(path.parent)
+    except OSError:
+        raise RuntimeError("helper runtime directory is unavailable") from None
+    if not stat.S_ISDIR(parent.st_mode):
+        raise RuntimeError("helper runtime path is not a directory")
+    if parent.st_uid != uid:
+        raise RuntimeError("helper runtime directory has a foreign owner")
+    if stat.S_IMODE(parent.st_mode) != 0o700:
+        raise RuntimeError("helper runtime directory is not owner-private")
+
+    try:
+        info = os.lstat(path)
+    except OSError:
+        raise RuntimeError("helper socket is unavailable") from None
+    if not stat.S_ISSOCK(info.st_mode):
+        raise RuntimeError("helper path is not a socket")
+    if info.st_uid != uid:
+        raise RuntimeError("helper socket has a foreign owner")
+    if stat.S_IMODE(info.st_mode) != 0o600:
+        raise RuntimeError("helper socket is not owner-private")
+
+
 def request(op: str, item_id: str = "") -> dict:
     if op not in OPS:
         raise ValueError("unsupported operation")
@@ -46,6 +80,7 @@ def request(op: str, item_id: str = "") -> dict:
     encoded = json.dumps(payload, separators=(",", ":")).encode() + b"\n"
 
     path = socket_path()
+    verify_socket(path)
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
         client.settimeout(2.0)
         client.connect(str(path))
