@@ -9,7 +9,9 @@ Authenticator codes.
 
 ## Development status
 
-This is currently a **development preview**, not a real-account release.
+This is currently a **development preview**. The panel-native helper works with
+local Authenticator entries, but real Proton-account login/sync still requires a
+human acceptance test.
 
 Completed and tested:
 
@@ -17,19 +19,26 @@ Completed and tested:
 - bounded line-delimited JSON over a user-owned Unix socket;
 - helper client with no password/token/secret/code in argv;
 - copy requests by opaque item ID;
-- official `@protontech/authenticator-rust-core` v0.28.8 code generation;
-- all six RFC 6238 SHA-1 vectors;
-- deterministic popup fixture (`94287082`, then `37359152`);
-- `0700` runtime directory and `0600` socket.
+- exact pinned GPL helper fork builds without Tauri devtools and runs hidden;
+- `0700` runtime directory, `0600` socket, and `SO_PEERCRED` UID check;
+- local RFC TOTP entry flowed Proton DB → helper → Quattro popup;
+- real current/next codes matched an independent RFC HMAC calculation;
+- copy by opaque ID wrote the expected code and conditionally expired it after
+  20 seconds;
+- deterministic official-core TOTP (`94287082`, then `37359152`) and Steam
+  (`PV9M4`, then `B26KJ`) fixtures.
 
-Still in progress:
+Still untested:
 
-- the production helper patch in the pinned Proton WebClients fork;
-- official Proton login, encrypted sync, lock, and clipboard integration;
-- a human real-account acceptance test.
+- interactive login with a real Proton account;
+- account-backed encrypted sync against another Proton Authenticator device;
+- login challenges such as CAPTCHA, mailbox 2FA, or extra-password prompts.
 
-Do not use the fixture with real secrets. The plugin will not be published as a
-finished authenticator until the production helper and real-account handoff pass.
+Do not use the fixture with real secrets. Real-account support must not be
+claimed until a user completes the interactive acceptance test.
+
+Runtime requirements: Omarchy Quattro on Wayland, a user systemd session, and
+Omarchy's `wl-clipboard` tools at `/usr/bin/wl-copy` and `/usr/bin/wl-paste`.
 
 ## Architecture
 
@@ -48,8 +57,9 @@ The selected design therefore has two processes:
    opaque item IDs for copy. It never receives passwords, auth tokens, encrypted
    entry secrets, storage keys, or Proton user keys.
 
-A temporary helper window is allowed for first login/unlock. Normal use happens
-inside the Quattro popup; it does not open the full Authenticator app.
+A temporary helper window opens directly to Proton's official Device sync modal
+for first login. Normal code use and hide/show stay inside the Quattro popup; they
+do not open the full Authenticator app.
 
 ## Intended use
 
@@ -58,7 +68,7 @@ inside the Quattro popup; it does not open the full Authenticator app.
 - `j` / `k`: select a code.
 - Enter or `c`: ask the helper to copy the selected code.
 - `r`: refresh.
-- `l`: lock and clear visible rows.
+- `l`: hide or restore code rows through the owner-only helper socket.
 - Each row shows the current code, next code, and remaining seconds.
 
 ## Development verification
@@ -82,7 +92,7 @@ validator, real shell restart, IPC status, and shell log are the panel gate.
 
 - Proton WebClients upstream: https://github.com/ProtonMail/WebClients
 - Auditable fork: https://github.com/Zeus-Deus/WebClients
-- Official core package: `@protontech/authenticator-rust-core@2.0.0`
+- Official core package: `@protontech/authenticator-rust-core@0.28.8`
 - Exact source commit and npm integrity: `helper/proton-helper.lock.json`
 - Proton Authenticator: https://proton.me/authenticator
 - Proton Authenticator source application:

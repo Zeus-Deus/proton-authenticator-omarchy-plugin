@@ -20,47 +20,71 @@ Item {
   property string account: ""
   property int generation: 0
   property int now: 0
+  property int entryCount: 0
   property var entries: []
   property string error: ""
   property string actionStatus: ""
+  property var unlockResponse: null
 
   readonly property string homeDir: Quickshell.env("HOME") || ""
   readonly property string pluginDir:
     homeDir + "/.config/omarchy/plugins/io.github.zeus-deus.proton-authenticator"
   readonly property string clientPath: pluginDir + "/scripts/helper_client.py"
   readonly property string helperBinary: homeDir + "/.local/bin/proton-authenticator-omarchy-helper"
-  readonly property bool busy: snapshotProcess.running || copyProcess.running || lockProcess.running
+  readonly property bool busy: snapshotProcess.running || copyProcess.running || lockProcess.running || unlockProcess.running
 
   signal statusUpdated()
 
   function refresh() {
-    if (snapshotProcess.running || clientPath === "") return
+    if (!panelOpen || snapshotProcess.running || clientPath === "") return
     snapshotProcess.command = ["python3", clientPath, "snapshot"]
     snapshotProcess.running = true
   }
 
+  function clearVisibleRows() {
+    if (snapshotProcess.running) snapshotProcess.running = false
+    entries = []
+    now = 0
+    generation = 0
+    statusUpdated()
+  }
+
+  function setActionStatus(message) {
+    actionStatus = String(message || "")
+    actionClearTimer.restart()
+  }
+
   function copyCode(itemId) {
     var id = String(itemId || "")
-    if (!/^[A-Za-z0-9._:-]{1,128}$/.test(id) || copyProcess.running) {
+    if (!/^[A-Za-z0-9._:-]{1,128}$/.test(id)) {
       error = "Invalid code item"
       return
     }
+    if (copyProcess.running || lockProcess.running || unlockProcess.running) return
+    actionClearTimer.stop()
     actionStatus = ""
     copyProcess.command = ["python3", clientPath, "copy", id]
     copyProcess.running = true
   }
 
   function lock() {
-    if (lockProcess.running) return
+    if (lockProcess.running || copyProcess.running || unlockProcess.running) return
     lockProcess.command = ["python3", clientPath, "lock"]
     lockProcess.running = true
+  }
+
+  function showCodes() {
+    if (unlockProcess.running || copyProcess.running || lockProcess.running) return
+    unlockResponse = null
+    unlockProcess.command = ["python3", clientPath, "unlock"]
+    unlockProcess.running = true
   }
 
   function launchLogin() {
     // Fixed helper executable and fixed mode. Credentials are entered only in
     // the helper's Proton UI and never cross argv, QML properties, or shell IPC.
     Quickshell.execDetached([helperBinary, "--background", "--login"])
-    actionStatus = "Opening secure Proton sign-in"
+    setActionStatus("Opening secure Proton sign-in")
   }
 
   function openHelperSource() {
@@ -69,6 +93,8 @@ Item {
 
   function applySnapshot(raw) {
     var next = Model.parseHelperSnapshot(raw)
+    if (!panelOpen && next.ok) return
+    if (next.ok && !Model.shouldAcceptGeneration(generation, next.generation)) return
     checked = true
     available = next.ok
     state = next.state
@@ -76,8 +102,9 @@ Item {
     synced = next.synced
     account = next.account
     generation = next.generation
-    now = next.now
-    entries = next.entries
+    entryCount = next.entries.length
+    now = panelOpen ? next.now : 0
+    entries = panelOpen ? next.entries : []
     error = next.error
     statusUpdated()
   }
@@ -86,9 +113,10 @@ Item {
     id: snapshotProcess
     running: false
     command: []
-    stdout: StdioCollector { id: snapshotOut; waitForEnd: true }
-    stderr: StdioCollector { waitForEnd: true }
-    onExited: root.applySnapshot(snapshotOut.text)
+    stdout: SplitParser {
+      onRead: function(line) { root.applySnapshot(String(line)) }
+    }
+    stderr: SplitParser {}
   }
 
   Process {
@@ -103,7 +131,7 @@ Item {
         var response = JSON.parse(String(copyOut.text || ""))
         ok = exitCode === 0 && response && response.v === 1 && response.ok === true && response.copied === true
       } catch (e) {}
-      actionStatus = ok ? "Code copied" : "Could not copy code"
+      root.setActionStatus(ok ? "Code copied" : "Could not copy code")
       if (!ok) error = "Helper rejected the copy request"
       root.statusUpdated()
     }
@@ -116,14 +144,55 @@ Item {
     stdout: StdioCollector { id: lockOut; waitForEnd: true }
     stderr: StdioCollector { waitForEnd: true }
     onExited: function(exitCode) {
-      if (exitCode === 0) {
+      var response = null
+      try { response = JSON.parse(String(lockOut.text || "")) } catch (e) {}
+      var accepted = exitCode === 0 && response && response.v === 1 && response.ok === true
+        && response.locked === true && Model.shouldAcceptGeneration(root.generation, response.generation)
+      if (accepted) {
+        root.generation = Math.floor(Number(response.generation))
         root.state = "locked"
         root.locked = true
+        root.entryCount = 0
         root.entries = []
-        root.actionStatus = "Codes hidden"
+        root.setActionStatus("Codes hidden")
+      } else {
+        root.error = "Helper rejected the hide request"
       }
       root.refresh()
     }
+  }
+
+  Process {
+    id: unlockProcess
+    running: false
+    command: []
+    stdout: SplitParser {
+      onRead: function(line) {
+        try { root.unlockResponse = JSON.parse(String(line || "")) } catch (e) { root.unlockResponse = null }
+      }
+    }
+    stderr: SplitParser {}
+    onExited: function(exitCode) {
+      var response = root.unlockResponse
+      var accepted = exitCode === 0 && response && response.v === 1 && response.ok === true
+        && response.locked === false && Model.shouldAcceptGeneration(root.generation, response.generation)
+      if (accepted) {
+        root.generation = Math.floor(Number(response.generation))
+        root.state = "unavailable"
+        root.locked = false
+        root.setActionStatus("Showing codes")
+      } else {
+        root.error = "Helper rejected the show request"
+      }
+      root.refresh()
+    }
+  }
+
+  Timer {
+    id: actionClearTimer
+    interval: 2500
+    repeat: false
+    onTriggered: root.actionStatus = ""
   }
 
   Timer {
@@ -133,6 +202,4 @@ Item {
     triggeredOnStart: true
     onTriggered: root.refresh()
   }
-
-  Component.onCompleted: refresh()
 }

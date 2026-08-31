@@ -56,10 +56,16 @@ test('official-core fixture serves bounded RFC codes over a private Unix socket'
   const payload = JSON.parse(snapshot.stdout);
   assert.equal(payload.ok, true);
   assert.equal(payload.coreVersion, '0.28.8');
-  assert.equal(payload.entries.length, 1);
-  assert.equal(payload.entries[0].code, '94287082');
-  assert.equal(payload.entries[0].nextCode, '37359152');
-  assert.equal(payload.entries[0].validUntil, 60);
+  assert.equal(payload.entries.length, 2);
+  const totp = payload.entries.find((entry) => entry.id === 'fixture-rfc6238');
+  assert.equal(totp.code, '94287082');
+  assert.equal(totp.nextCode, '37359152');
+  assert.equal(totp.validUntil, 60);
+  const steam = payload.entries.find((entry) => entry.id === 'fixture-steam');
+  assert.equal(steam.type, 'Steam');
+  assert.equal(steam.code, 'PV9M4');
+  assert.equal(steam.nextCode, 'B26KJ');
+  assert.equal(steam.validUntil, 60);
 
   const copied = runClient(socketPath, ['copy', 'fixture-rfc6238']);
   assert.equal(copied.status, 0);
@@ -78,4 +84,12 @@ test('official-core fixture serves bounded RFC codes over a private Unix socket'
   assert.deepEqual(JSON.parse(afterLock.stdout).entries, []);
   const copyWhileLocked = runClient(socketPath, ['copy', 'fixture-rfc6238']);
   assert.equal(copyWhileLocked.status, 1);
+
+  const unlocked = runClient(socketPath, ['unlock']);
+  assert.equal(unlocked.status, 0);
+  assert.equal(JSON.parse(unlocked.stdout).locked, false);
+  const afterUnlock = runClient(socketPath, ['snapshot']);
+  assert.equal(afterUnlock.status, 0);
+  assert.equal(JSON.parse(afterUnlock.stdout).state, 'ready');
+  assert.equal(JSON.parse(afterUnlock.stdout).entries.length, 2);
 });

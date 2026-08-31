@@ -3,11 +3,14 @@
   "protonWebClients": {
     "upstream": "https://github.com/ProtonMail/WebClients",
     "fork": "https://github.com/Zeus-Deus/WebClients",
-    "commit": "67e20e4f558c6a990444759bc6ebd10f47cab445"
+    "baseCommit": "67e20e4f558c6a990444759bc6ebd10f47cab445",
+    "helperBranch": "omarchy-authenticator-helper",
+    "helperCommit": "8913f24b235bd7eecc9e5149ae0ded2e277c0881"
   },
   "authenticatorRustCore": {
     "package": "@protontech/authenticator-rust-core",
     "version": "0.28.8",
     "integrity": "sha512-1pjTHiWq+ok5BOJdnckBC9kEyvIb7H5t7/XoqYVov0RhX1+b0PPatiMlXem3pZDLE3n8TKRP567vGnnKHStAjw=="
-  }
+  },
+  "officialCoreDependencyUsedByFixtureOnly": true
 }

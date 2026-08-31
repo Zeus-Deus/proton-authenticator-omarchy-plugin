@@ -14,6 +14,15 @@ test('snapshot polling uses the bounded local helper client only while the panel
   assert.match(service, /running:\s*root\.panelOpen/);
 });
 
+test('panel close clears rows and snapshot output is not retained in a collector', () => {
+  assert.match(panel, /else\s*\{[\s\S]{0,160}authenticator\.clearVisibleRows\(\)/);
+  assert.match(service, /function clearVisibleRows\(\)/);
+  assert.match(service, /stdout:\s*SplitParser\s*\{[\s\S]{0,180}applySnapshot/);
+  assert.doesNotMatch(service, /snapshotOut|stdout:\s*StdioCollector\s*\{\s*id:\s*snapshot/);
+  assert.match(service, /function clearVisibleRows\(\)[\s\S]{0,220}generation = 0/);
+  assert.match(service, /if \(!panelOpen && next\.ok\) return/);
+});
+
 test('the panel renders current and next codes from validated helper rows', () => {
   assert.match(panel, /entry\.code/);
   assert.match(panel, /entry\.nextCode/);
@@ -34,6 +43,19 @@ test('copy sends only an opaque item id to the helper', () => {
 
 test('QML never implements Proton auth, vault reads, or code generation', () => {
   assert.doesNotMatch(executableCode, /generateCode|generate_code|IndexedDB|keyring.*get|password|accessToken|refreshToken/i);
+});
+
+test('privacy latch restores rows through owner-only unlock without opening Proton', () => {
+  assert.match(service, /function showCodes\(\)[\s\S]{0,220}"unlock"/);
+  assert.match(panel, /authenticator\.locked\)[\s\S]{0,100}authenticator\.showCodes\(\)/);
+  assert.match(panel, /function unlock\(\): string \{ authenticator\.showCodes\(\); return "ok" \}/);
+});
+
+test('transient action feedback expires instead of becoming stale state', () => {
+  assert.match(service, /function setActionStatus\(message\)/);
+  assert.match(service, /id: actionClearTimer/);
+  assert.match(service, /interval: 2500/);
+  assert.match(service, /root\.actionStatus = ""/);
 });
 
 test('login handoff launches a fixed helper executable without credentials', () => {

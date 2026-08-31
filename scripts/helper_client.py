@@ -18,7 +18,7 @@ from pathlib import Path
 
 MAX_RESPONSE_BYTES = 1024 * 1024
 ITEM_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
-OPS = {"status", "snapshot", "copy", "lock"}
+OPS = {"status", "snapshot", "copy", "lock", "unlock"}
 
 
 def socket_path() -> Path:

@@ -32,7 +32,7 @@ Panel {
     if (authenticator.state === "needs_login") return "Sign in to enable encrypted sync"
     if (authenticator.locked) return "Codes hidden"
     if (authenticator.error !== "") return authenticator.error
-    var count = authenticator.entries.length
+    var count = authenticator.entryCount
     return count + (count === 1 ? " code" : " codes") + (authenticator.synced ? " · synced" : " · local")
   }
 
@@ -80,6 +80,7 @@ Panel {
       Qt.callLater(function() { keyCatcher.forceActiveFocus() })
     } else {
       searchField.text = ""
+      authenticator.clearVisibleRows()
     }
   }
   onFilteredEntriesChanged: {
@@ -101,6 +102,7 @@ Panel {
     function refresh(): string { authenticator.refresh(); return "ok" }
     function login(): string { authenticator.launchLogin(); return "ok" }
     function lock(): string { authenticator.lock(); return "ok" }
+    function unlock(): string { authenticator.showCodes(); return "ok" }
     function copy(itemId: string): string { authenticator.copyCode(itemId); return "ok" }
     function status(): string {
       return JSON.stringify({
@@ -109,7 +111,7 @@ Panel {
         state: authenticator.state,
         locked: authenticator.locked,
         synced: authenticator.synced,
-        count: authenticator.entries.length,
+        count: authenticator.entryCount,
         error: authenticator.error
       })
     }
@@ -149,6 +151,7 @@ Panel {
       }
       onActivateRequested: {
         if (root.ready) root.copySelected()
+        else if (authenticator.locked) authenticator.showCodes()
         else authenticator.launchLogin()
       }
       onCloseRequested: root.close()
@@ -158,7 +161,7 @@ Panel {
         else if (text === "r" || text === "R") authenticator.refresh()
         else if (text === "c" || text === "C") root.copySelected()
         else if (text === "l" || text === "L") {
-          if (authenticator.locked) authenticator.launchLogin()
+          if (authenticator.locked) authenticator.showCodes()
           else authenticator.lock()
         }
       }
@@ -285,7 +288,10 @@ Panel {
               width: parent.width
               text: authenticator.locked ? "Show codes" : "Sign in with Proton"
               foreground: root.foreground
-              onClicked: authenticator.launchLogin()
+              onClicked: {
+                if (authenticator.locked) authenticator.showCodes()
+                else authenticator.launchLogin()
+              }
             }
 
             Button {

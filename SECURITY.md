@@ -2,10 +2,10 @@
 
 ## Development warning
 
-The panel-native release is not complete. The deterministic fixture contains
-only the public RFC 6238 test secret and must never be used with real accounts.
-Real Proton login is not claimed until the pinned production helper is built and
-human-tested.
+The panel-native helper is implemented and has been exercised with public local
+RFC fixtures. The fixture must never be used with real secrets. Interactive
+Proton login and cross-device encrypted sync remain unverified until the user
+performs a real-account acceptance test.
 
 ## Process boundary
 
@@ -29,9 +29,9 @@ requires visible codes in the popup. Closing or locking must clear those rows.
 
 - runtime directory mode: `0700`;
 - socket mode: `0600`;
-- production helper must verify peer UID with `SO_PEERCRED`;
+- production helper verifies peer UID with `SO_PEERCRED`;
 - protocol: one bounded line-delimited JSON request and response;
-- request operations: `status`, `snapshot`, `copy`, `lock`;
+- request operations: `status`, `snapshot`, `copy`, `lock`, `unlock`;
 - copy carries only an opaque validated item ID;
 - responses are capped at 1 MiB and 200 rows;
 - metadata and codes are sanitized and validated fail-closed;
@@ -49,10 +49,15 @@ requires visible codes in the popup. Closing or locking must clear those rows.
 
 ## Clipboard
 
-Production copy happens in the helper, not QML. The helper must mark clipboard
-content sensitive when supported and clear after a short bounded TTL only if the
-clipboard still contains the code it wrote, so it never deletes newer user data.
-Clipboard-manager retention must be documented and tested separately.
+Production copy happens in the helper, not QML. The helper writes through stdin
+and clears after 20 seconds only if the clipboard still contains the code it
+wrote; copying the same current code again renews the 20-second window. It never
+deletes newer user data. That copy/expiry path was live-tested with the public
+RFC entry. Clipboard-manager history may retain copied values and must be treated
+as outside the helper's control.
+
+The background helper disables Proton application logging entirely. Normal
+foreground Proton launches retain upstream logging behavior.
 
 ## Source pinning
 

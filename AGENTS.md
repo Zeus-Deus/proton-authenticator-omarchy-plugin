@@ -2,9 +2,9 @@
 
 ## Current state
 
-Development preview. The popup and deterministic official-core fixture work;
-the pinned real Proton helper is not complete and real-account support must not
-be claimed.
+Development preview. The panel, pinned helper fork, local RFC code path, and
+helper-owned clipboard expiry work. Real Proton login/cross-device sync remains a
+human acceptance gate and must not be claimed.
 
 ## Architecture
 

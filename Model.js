@@ -11,15 +11,57 @@ var MAX_HELPER_BYTES = 1024 * 1024;
 var MAX_HELPER_ENTRIES = 200;
 var MAX_TEXT = 160;
 
+function utf8ByteLength(value) {
+  var s = String(value || "");
+  var bytes = 0;
+  for (var i = 0; i < s.length; i++) {
+    var code = s.charCodeAt(i);
+    if (code < 0x80) bytes += 1;
+    else if (code < 0x800) bytes += 2;
+    else if (code >= 0xD800 && code <= 0xDBFF && i + 1 < s.length
+             && s.charCodeAt(i + 1) >= 0xDC00 && s.charCodeAt(i + 1) <= 0xDFFF) {
+      bytes += 4;
+      i += 1;
+    } else bytes += 3;
+  }
+  return bytes;
+}
+
+function truncateUtf8(value, maxBytes) {
+  var s = String(value || "");
+  var max = Math.max(0, Math.floor(Number(maxBytes) || 0));
+  if (utf8ByteLength(s) <= max) return s;
+  var suffix = max >= 3 ? "\u2026" : "";
+  var budget = max - utf8ByteLength(suffix);
+  var out = "";
+  var used = 0;
+  for (var i = 0; i < s.length;) {
+    var code = s.charCodeAt(i);
+    var units = 1;
+    var size;
+    if (code < 0x80) size = 1;
+    else if (code < 0x800) size = 2;
+    else if (code >= 0xD800 && code <= 0xDBFF && i + 1 < s.length
+             && s.charCodeAt(i + 1) >= 0xDC00 && s.charCodeAt(i + 1) <= 0xDFFF) {
+      size = 4;
+      units = 2;
+    } else size = 3;
+    if (used + size > budget) break;
+    out += s.substr(i, units);
+    used += size;
+    i += units;
+  }
+  return out + suffix;
+}
+
 function sanitizeText(value, limit) {
   var s = String(value === undefined || value === null ? "" : value);
   s = s.replace(/[\u0000-\u001F\u007F-\u009F]/g, " ");
-  s = s.replace(/[\u200E\u200F\u202A-\u202E\u2066-\u2069]/g, "");
+  s = s.replace(/[\u061C\u200E\u200F\u202A-\u202E\u2060\u2066-\u2069]/g, "");
   s = s.replace(/[\u200B-\u200D\uFEFF]/g, "");
   s = s.replace(/\s+/g, " ").replace(/^ +| +$/g, "");
   var max = limit === undefined ? MAX_TEXT : Math.max(0, Number(limit) || 0);
-  if (s.length > max) s = s.slice(0, Math.max(0, max - 1)) + "\u2026";
-  return s;
+  return truncateUtf8(s, max);
 }
 
 function safeBinaryPath(value) {
@@ -156,6 +198,12 @@ function filterEntries(entries, query) {
   return result;
 }
 
+function shouldAcceptGeneration(current, incoming) {
+  var currentValue = Math.max(0, Math.floor(Number(current) || 0));
+  var incomingValue = Math.floor(Number(incoming));
+  return isFinite(incomingValue) && incomingValue >= 0 && incomingValue >= currentValue;
+}
+
 function remainingSeconds(validUntil, now) {
   var end = Math.floor(Number(validUntil) || 0);
   var current = Math.floor(Number(now) || 0);
@@ -198,6 +246,7 @@ if (typeof module !== "undefined" && module.exports) {
     safeHelperCode: safeHelperCode,
     parseHelperSnapshot: parseHelperSnapshot,
     filterEntries: filterEntries,
+    shouldAcceptGeneration: shouldAcceptGeneration,
     remainingSeconds: remainingSeconds,
     launchArgs: launchArgs,
     focusArgs: focusArgs,

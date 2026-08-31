@@ -12,6 +12,7 @@ import {
   entry_from_uri,
   generate_code,
   library_version,
+  new_steam_entry_from_params,
 } from '@protontech/authenticator-rust-core/worker/proton_authenticator_web.js';
 
 if (!process.argv.includes('--fixture')) throw new Error('fixture server requires --fixture');
@@ -20,10 +21,17 @@ const MAX_REQUEST_BYTES = 16 * 1024;
 const fixedTime = BigInt(process.env.PROTON_AUTH_FIXTURE_TIME || '59');
 const socketPath = process.env.PROTON_AUTH_HELPER_SOCKET || path.join(os.tmpdir(), `proton-auth-fixture-${process.pid}.sock`);
 const runtimeDir = path.dirname(socketPath);
-const fixtureEntry = entry_from_uri(
+const totpEntry = entry_from_uri(
   'otpauth://totp/RFC6238:test?secret=GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ&issuer=RFC6238&algorithm=SHA1&digits=8&period=30'
 );
-fixtureEntry.id = 'fixture-rfc6238';
+totpEntry.id = 'fixture-rfc6238';
+const steamEntry = new_steam_entry_from_params({
+  name: 'Steam RFC fixture',
+  secret: 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ',
+  note: undefined,
+});
+steamEntry.id = 'fixture-steam';
+const fixtureEntries = [totpEntry, steamEntry];
 let generation = 1;
 let isLocked = false;
 
@@ -49,9 +57,21 @@ function snapshot(id) {
       entries: [],
     });
   }
-  const codes = generate_code(fixtureEntry, fixedTime);
-  const period = Number(fixtureEntry.period || 30);
   const now = Number(fixedTime);
+  const entries = fixtureEntries.map((entry) => {
+    const codes = generate_code(entry, fixedTime);
+    const period = Number(entry.period || 30);
+    return {
+      id: entry.id,
+      name: entry.name,
+      issuer: entry.issuer,
+      type: entry.entry_type,
+      code: codes.current_code,
+      nextCode: codes.next_code,
+      period,
+      validUntil: now - (now % period) + period,
+    };
+  });
   return response(id, {
     ok: true,
     state: 'ready',
@@ -61,16 +81,7 @@ function snapshot(id) {
     generation,
     now,
     coreVersion: library_version(),
-    entries: [{
-      id: fixtureEntry.id,
-      name: fixtureEntry.name,
-      issuer: fixtureEntry.issuer,
-      type: fixtureEntry.entry_type,
-      code: codes.current_code,
-      nextCode: codes.next_code,
-      period,
-      validUntil: now - (now % period) + period,
-    }],
+    entries,
   });
 }
 
@@ -80,13 +91,18 @@ function handle(request) {
   if (request.op === 'status' || request.op === 'snapshot') return snapshot(id);
   if (request.op === 'copy') {
     if (isLocked) return response(id, { ok: false, error: 'locked', generation });
-    if (request.itemId !== fixtureEntry.id) return response(id, { ok: false, error: 'not_found' });
+    if (!fixtureEntries.some((entry) => request.itemId === entry.id)) return response(id, { ok: false, error: 'not_found' });
     return response(id, { ok: true, copied: true, generation });
   }
   if (request.op === 'lock') {
     isLocked = true;
     generation++;
     return response(id, { ok: true, state: 'locked', locked: true, generation });
+  }
+  if (request.op === 'unlock') {
+    isLocked = false;
+    generation++;
+    return response(id, { ok: true, state: 'ready', locked: false, generation });
   }
   return response(id, { ok: false, error: 'unsupported_operation' });
 }

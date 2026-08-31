@@ -3,9 +3,10 @@ const assert = require('node:assert/strict');
 const M = require('../Model.js');
 
 test('sanitizeText removes controls, bidi overrides, and zero-width spoofing', () => {
-  const value = 'Proton\nAccount\u202Eabc\u200B';
+  const value = 'Proton\nAccount\u061C\u200E\u200F\u202Eabc\u200B\u2060';
   const out = M.sanitizeText(value);
   assert.equal(out, 'Proton Accountabc');
+  assert.ok(Buffer.byteLength(M.sanitizeText('ü'.repeat(80), 80), 'utf8') <= 80);
 });
 
 test('safeBinaryPath accepts absolute executable paths only', () => {
@@ -109,6 +110,13 @@ test('parseHelperSnapshot rejects malformed codes, ids, and oversized responses'
   });
   assert.deepEqual(M.parseHelperSnapshot(malicious).entries, []);
   assert.equal(M.parseHelperSnapshot('x'.repeat(M.MAX_HELPER_BYTES + 1)).ok, false);
+});
+
+test('shouldAcceptGeneration rejects snapshots older than the privacy latch', () => {
+  assert.equal(M.shouldAcceptGeneration(8, 7), false);
+  assert.equal(M.shouldAcceptGeneration(8, 8), true);
+  assert.equal(M.shouldAcceptGeneration(8, 9), true);
+  assert.equal(M.shouldAcceptGeneration(0, -1), false);
 });
 
 test('filterEntries searches sanitized issuer/name and remainingSeconds clamps', () => {
