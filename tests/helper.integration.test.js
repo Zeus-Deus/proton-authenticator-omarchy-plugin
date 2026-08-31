@@ -199,6 +199,7 @@ test('the client bounds the whole exchange, not each recv', async (t) => {
   // well inside the per-recv timeout, so only a wall-clock deadline stops it.
   const timers = [];
   const slow = net.createServer((client) => {
+    client.on('error', () => {});
     client.on('data', () => {
       for (let i = 0; i < 60; i++) {
         timers.push(setTimeout(() => { try { client.write('x'); } catch {} }, 500 * (i + 1)));
