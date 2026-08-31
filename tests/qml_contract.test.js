@@ -50,10 +50,23 @@ test('QML never implements Proton auth, vault reads, or code generation', () => 
   assert.doesNotMatch(executableCode, /generateCode|generate_code|IndexedDB|keyring.*get|password|accessToken|refreshToken/i);
 });
 
-test('privacy latch restores rows through owner-only unlock without opening Proton', () => {
+test('privacy latch restores rows through panel-focused unlock without opening Proton', () => {
   assert.match(service, /function showCodes\(\)[\s\S]{0,220}"unlock"/);
   assert.match(panel, /authenticator\.locked\)[\s\S]{0,100}authenticator\.showCodes\(\)/);
-  assert.match(panel, /function unlock\(\): string \{ authenticator\.showCodes\(\); return "ok" \}/);
+});
+
+test('the IPC surface publishes only fail-safe verbs', () => {
+  const ipc = panel.match(/IpcHandler\s*\{[\s\S]*?\n  \}/);
+  assert.ok(ipc, 'IpcHandler block not found');
+  const block = ipc[0];
+  assert.doesNotMatch(block, /function unlock\b/);
+  assert.doesNotMatch(block, /function copy\b/);
+  assert.doesNotMatch(block, /function login\b/);
+  assert.match(block, /function lock\(\): string/);
+  assert.match(block, /function status\(\): string/);
+  // `status` must never carry code material.
+  const status = block.match(/function status\(\): string \{[\s\S]*?\n    \}/)[0];
+  assert.doesNotMatch(status, /entries|\bcode\b|nextCode|validUntil/);
 });
 
 test('transient action feedback expires instead of becoming stale state', () => {

@@ -93,6 +93,11 @@ Panel {
     settings: root.settings
   }
 
+  // Quickshell IPC is reachable by any process running as this user; it carries
+  // no authentication and `manageIpc: false` adds none. Only verbs that move
+  // toward the safe state or expose no code material are published here.
+  // Releasing the privacy latch, copying a code, and summoning Proton's login
+  // window all require focused input in the panel itself.
   IpcHandler {
     target: root.ipcTarget
     function open(): void { root.open() }
@@ -101,10 +106,7 @@ Panel {
     function hide(): void { root.close() }
     function toggle(): void { root.toggle() }
     function refresh(): string { authenticator.refresh(); return "ok" }
-    function login(): string { authenticator.launchLogin(); return "ok" }
     function lock(): string { authenticator.lock(); return "ok" }
-    function unlock(): string { authenticator.showCodes(); return "ok" }
-    function copy(itemId: string): string { authenticator.copyCode(itemId); return "ok" }
     function status(): string {
       return JSON.stringify({
         checked: authenticator.checked,
