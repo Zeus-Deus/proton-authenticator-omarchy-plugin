@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/python3
 """Bounded client for the local Proton Authenticator helper socket.
 
 Codes are returned on stdout only because the user explicitly requires them in

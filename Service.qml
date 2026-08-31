@@ -30,6 +30,10 @@ Item {
   readonly property string pluginDir:
     homeDir + "/.config/omarchy/plugins/io.github.zeus-deus.proton-authenticator"
   readonly property string clientPath: pluginDir + "/scripts/helper_client.py"
+  // Absolute interpreter: the shell's PATH contains user-writable directories
+  // ahead of /usr/bin, so a bare "python3" would let one dropped file read
+  // every snapshot and forge helper responses.
+  readonly property string pythonBinary: "/usr/bin/python3"
   readonly property string helperBinary: homeDir + "/.local/bin/proton-authenticator-omarchy-helper"
   readonly property bool busy: snapshotProcess.running || copyProcess.running || lockProcess.running || unlockProcess.running
 
@@ -37,7 +41,7 @@ Item {
 
   function refresh() {
     if (!panelOpen || snapshotProcess.running || clientPath === "") return
-    snapshotProcess.command = ["python3", clientPath, "snapshot"]
+    snapshotProcess.command = [pythonBinary, clientPath, "snapshot"]
     snapshotProcess.running = true
   }
 
@@ -63,20 +67,20 @@ Item {
     if (copyProcess.running || lockProcess.running || unlockProcess.running) return
     actionClearTimer.stop()
     actionStatus = ""
-    copyProcess.command = ["python3", clientPath, "copy", id]
+    copyProcess.command = [pythonBinary, clientPath, "copy", id]
     copyProcess.running = true
   }
 
   function lock() {
     if (lockProcess.running || copyProcess.running || unlockProcess.running) return
-    lockProcess.command = ["python3", clientPath, "lock"]
+    lockProcess.command = [pythonBinary, clientPath, "lock"]
     lockProcess.running = true
   }
 
   function showCodes() {
     if (unlockProcess.running || copyProcess.running || lockProcess.running) return
     unlockResponse = null
-    unlockProcess.command = ["python3", clientPath, "unlock"]
+    unlockProcess.command = [pythonBinary, clientPath, "unlock"]
     unlockProcess.running = true
   }
 

@@ -14,6 +14,14 @@ test('snapshot polling uses the bounded local helper client only while the panel
   assert.match(service, /running:\s*root\.panelOpen/);
 });
 
+test('every helper client spawn pins an absolute interpreter, never a PATH lookup', () => {
+  assert.match(service, /readonly property string pythonBinary:\s*"\/usr\/bin\/python3"/);
+  assert.doesNotMatch(executableCode, /command\s*=\s*\[\s*"python3"/);
+  const spawns = service.match(/command\s*=\s*\[[^\]]*\]/g) || [];
+  assert.equal(spawns.length, 4);
+  for (const spawn of spawns) assert.match(spawn, /^command\s*=\s*\[pythonBinary,/);
+});
+
 test('panel close clears rows and snapshot output is not retained in a collector', () => {
   assert.match(panel, /else\s*\{[\s\S]{0,160}authenticator\.clearVisibleRows\(\)/);
   assert.match(service, /function clearVisibleRows\(\)/);
