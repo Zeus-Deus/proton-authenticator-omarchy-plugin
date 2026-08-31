@@ -19,6 +19,10 @@ Item {
   property bool synced: false
   property string account: ""
   property int generation: 0
+  // Highest generation seen this session. It never decreases, so closing the
+  // panel cannot erase the privacy-latch floor and let a replayed pre-lock
+  // snapshot repopulate rows on reopen.
+  property int latchFloor: 0
   property int now: 0
   property int entryCount: 0
   property var entries: []
@@ -49,7 +53,9 @@ Item {
     if (snapshotProcess.running) snapshotProcess.running = false
     entries = []
     now = 0
-    generation = 0
+    unlockResponse = null
+    latchFloor = Model.latchFloor(latchFloor, generation)
+    generation = latchFloor
     statusUpdated()
   }
 
@@ -108,7 +114,8 @@ Item {
     locked = next.locked
     synced = next.synced
     account = next.account
-    generation = next.generation
+    latchFloor = Model.latchFloor(latchFloor, next.generation)
+    generation = latchFloor
     entryCount = next.entries.length
     now = panelOpen ? next.now : 0
     entries = panelOpen ? next.entries : []
@@ -156,7 +163,8 @@ Item {
       var accepted = exitCode === 0 && response && response.v === 1 && response.ok === true
         && response.locked === true && Model.shouldAcceptGeneration(root.generation, response.generation)
       if (accepted) {
-        root.generation = Math.floor(Number(response.generation))
+        root.latchFloor = Model.latchFloor(root.latchFloor, response.generation)
+        root.generation = root.latchFloor
         root.state = "locked"
         root.locked = true
         root.entryCount = 0
@@ -184,7 +192,8 @@ Item {
       var accepted = exitCode === 0 && response && response.v === 1 && response.ok === true
         && response.locked === false && Model.shouldAcceptGeneration(root.generation, response.generation)
       if (accepted) {
-        root.generation = Math.floor(Number(response.generation))
+        root.latchFloor = Model.latchFloor(root.latchFloor, response.generation)
+        root.generation = root.latchFloor
         root.state = "unavailable"
         root.locked = false
         root.setActionStatus("Showing codes")

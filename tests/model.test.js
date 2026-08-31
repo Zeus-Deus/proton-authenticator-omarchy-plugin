@@ -115,3 +115,18 @@ test('the response cap counts UTF-8 bytes, not UTF-16 code units', () => {
   // An ASCII payload inside the cap still parses.
   assert.equal(M.parseHelperSnapshot(payload('user@example.test')).ok, true);
 });
+
+test('shouldAcceptGeneration keeps a latch floor and rejects forged counters', () => {
+  assert.equal(M.shouldAcceptGeneration(5, 4), false);
+  assert.equal(M.shouldAcceptGeneration(5, 5), true);
+  // A forged high generation must not be able to wedge the floor forever.
+  assert.equal(M.shouldAcceptGeneration(5, M.MAX_GENERATION + 1), false);
+  assert.equal(M.shouldAcceptGeneration(5, 2 ** 53), false);
+  assert.equal(M.clampGeneration(-1), 0);
+  assert.equal(M.clampGeneration(M.MAX_GENERATION + 10), M.MAX_GENERATION);
+  assert.equal(M.clampGeneration(7), 7);
+  // The floor is a max, so a close/open cycle cannot lower it.
+  assert.equal(M.latchFloor(9, 3), 9);
+  assert.equal(M.latchFloor(3, 9), 9);
+  assert.equal(M.latchFloor(0, 0), 0);
+});

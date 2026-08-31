@@ -9,6 +9,10 @@
 var MAX_HELPER_BYTES = 1024 * 1024;
 var MAX_HELPER_ENTRIES = 200;
 var MAX_TEXT = 160;
+// A forged generation counter can never be caught up by a real helper, which
+// would wedge the staleness comparison for the life of the session, so bound
+// what a snapshot is allowed to claim.
+var MAX_GENERATION = 2147483647;
 
 function utf8ByteLength(value) {
   var s = String(value || "");
@@ -107,7 +111,7 @@ function parseHelperSnapshot(text) {
   var state = String(data.state || "unavailable");
   if (!allowedStates[state]) state = "error";
   var now = Math.max(0, Math.floor(Number(data.now) || 0));
-  var generation = Math.max(0, Math.floor(Number(data.generation) || 0));
+  var generation = clampGeneration(data.generation);
   var values = data.entries instanceof Array ? data.entries : [];
   var entries = [];
 
@@ -160,10 +164,23 @@ function filterEntries(entries, query) {
   return result;
 }
 
+function clampGeneration(value) {
+  var generation = Math.floor(Number(value) || 0);
+  if (!isFinite(generation) || generation < 0) return 0;
+  return Math.min(generation, MAX_GENERATION);
+}
+
 function shouldAcceptGeneration(current, incoming) {
   var currentValue = Math.max(0, Math.floor(Number(current) || 0));
   var incomingValue = Math.floor(Number(incoming));
-  return isFinite(incomingValue) && incomingValue >= 0 && incomingValue >= currentValue;
+  if (!isFinite(incomingValue) || incomingValue < 0 || incomingValue > MAX_GENERATION) return false;
+  return incomingValue >= currentValue;
+}
+
+// The privacy latch floor must survive a panel close: resetting the local
+// generation to 0 would make every replayed pre-lock snapshot acceptable again.
+function latchFloor(current, incoming) {
+  return Math.max(clampGeneration(current), clampGeneration(incoming));
 }
 
 function remainingSeconds(validUntil, now) {
@@ -176,12 +193,15 @@ if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     MAX_HELPER_BYTES: MAX_HELPER_BYTES,
     MAX_HELPER_ENTRIES: MAX_HELPER_ENTRIES,
+    MAX_GENERATION: MAX_GENERATION,
     utf8ByteLength: utf8ByteLength,
     sanitizeText: sanitizeText,
 
     safeHelperCode: safeHelperCode,
     parseHelperSnapshot: parseHelperSnapshot,
     filterEntries: filterEntries,
+    clampGeneration: clampGeneration,
+    latchFloor: latchFloor,
     shouldAcceptGeneration: shouldAcceptGeneration,
     remainingSeconds: remainingSeconds
   };

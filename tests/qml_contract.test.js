@@ -27,8 +27,19 @@ test('panel close clears rows and snapshot output is not retained in a collector
   assert.match(service, /function clearVisibleRows\(\)/);
   assert.match(service, /stdout:\s*SplitParser\s*\{[\s\S]{0,180}applySnapshot/);
   assert.doesNotMatch(service, /snapshotOut|stdout:\s*StdioCollector\s*\{\s*id:\s*snapshot/);
-  assert.match(service, /function clearVisibleRows\(\)[\s\S]{0,220}generation = 0/);
+  assert.match(service, /function clearVisibleRows\(\)[\s\S]{0,260}entries = \[\]/);
+  assert.match(service, /function clearVisibleRows\(\)[\s\S]{0,260}unlockResponse = null/);
   assert.match(service, /if \(!panelOpen && next\.ok\) return/);
+});
+
+test('the privacy latch floor survives a panel close instead of resetting to zero', () => {
+  assert.match(service, /property int latchFloor: 0/);
+  assert.doesNotMatch(service, /function clearVisibleRows\(\)[\s\S]{0,260}generation = 0/);
+  assert.match(service, /function clearVisibleRows\(\)[\s\S]{0,260}latchFloor = Model\.latchFloor\(latchFloor, generation\)/);
+  assert.match(service, /function clearVisibleRows\(\)[\s\S]{0,300}generation = latchFloor/);
+  // Every generation write goes through the monotonic floor.
+  assert.doesNotMatch(service, /generation = Math\.floor\(Number\(response\.generation\)\)/);
+  assert.equal((service.match(/Model\.latchFloor\(/g) || []).length, 4);
 });
 
 test('the panel renders current and next codes from validated helper rows', () => {
