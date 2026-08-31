@@ -23,7 +23,8 @@ The separate GPL-3 helper derived from Proton's open-source Authenticator owns:
 - clipboard write and conditional expiry.
 
 The QML process receives bounded display rows because the user explicitly
-requires visible codes in the popup. Closing or locking must clear those rows.
+requires visible codes in the popup. Closing the panel, hiding rows, and locking
+the helper must all clear those rows immediately.
 
 ## Unix-socket contract
 
@@ -31,9 +32,14 @@ requires visible codes in the popup. Closing or locking must clear those rows.
 - socket mode: `0600`;
 - production helper verifies peer UID with `SO_PEERCRED`;
 - protocol: one bounded line-delimited JSON request and response;
-- request operations: `status`, `snapshot`, `copy`, `lock`, `unlock`;
+- request operations: `status`, `snapshot`, `copy`, `lock`;
 - copy carries only an opaque validated item ID;
 - responses are capped at 1 MiB of UTF-8 bytes and 200 rows;
+- the helper stamps each publication and treats one older than 5 seconds as
+  expired: a `ready` snapshot degrades to `unavailable` with no rows and
+  `stale: true`, and `copy` fails with `stale` rather than handing out a code
+  that has already rolled over. The panel shows this as a transient paused
+  state, not as an unavailable helper;
 - code, ID, type, and period validation is fail-closed; metadata text is
   sanitized for controls, bidi marks, and invisible/filler code points;
 - generation IDs are a monotonic floor that survives panel close, so a replayed
@@ -73,16 +79,37 @@ adds none. Only fail-safe verbs are published:
 - `lock` — moves toward the safe state;
 - `status` — booleans, state name, entry count, and error text; no codes.
 
-`unlock`, `copy`, and `login` are deliberately **not** exposed. Releasing the
-privacy latch, writing a code to the clipboard, and summoning Proton's login
-window require focused input in the panel.
+`unlock`, `copy`, and `login` are deliberately **not** exposed. Copying a code
+and summoning Proton's login window require focused input in the panel. There is
+no `unlock` verb to expose: the helper removed that socket operation entirely.
+
+## Hiding codes
+
+There are two distinct controls, and they are not the same strength:
+
+- **Panel-local hide (`l`).** The panel stops rendering rows and stops polling
+  the helper. Nothing is sent over the socket, and **the helper still holds the
+  codes** — this hides them from the screen, not from the machine. It is
+  reversible from the panel because it never left the panel.
+- **Helper lock (`shift+l`, and the `lock` IPC verb).** The helper clears its
+  published snapshot, drops the clipboard owner, and latches itself locked.
+  This is one-way: the socket exposes no release operation, so the helper stays
+  locked until the helper service restarts.
+
+The asymmetry is deliberate. A socket "resume" operation would be callable by
+any same-UID process, so it would be a release path for every process on the
+session rather than for the panel specifically, and the mode bits and
+`SO_PEERCRED` cannot tell those apart. Keeping the resume purely panel-local is
+honest: the panel controls only its own rendering, and the one control that
+really removes code material from the helper is fail-safe in one direction.
 
 ## Residual risk
 
 - `SO_PEERCRED` authenticates a Unix UID, not one trusted application. Any
   same-UID process — including another unsandboxed shell plugin — can talk to
-  the helper socket. The privacy latch is a privacy control, not authentication
-  against same-UID malware.
+  the helper socket. Neither hiding control is authentication against same-UID
+  malware: panel-local hiding leaves the helper holding the codes, and the
+  helper lock only stops the helper serving them to anyone until it restarts.
 - Omarchy plugins run unsandboxed inside `omarchy-shell`, so another plugin
   shares that process with rendered codes.
 - Visible codes lose the vendor client's window protections: screenshots,
