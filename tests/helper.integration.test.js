@@ -4,13 +4,14 @@ const childProcess = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const net = require('node:net');
 
 const root = path.join(__dirname, '..');
-const fixture = path.join(root, 'helper', 'fixture-server.mjs');
+const fixture = path.join(root, 'tests', 'fixtures', 'fixture-server.mjs');
 const client = path.join(root, 'scripts', 'helper_client.py');
 
 function runClient(socketPath, args) {
-  return childProcess.spawnSync('python3', [client, ...args], {
+  return childProcess.spawnSync('/usr/bin/python3', [client, ...args], {
     cwd: root,
     env: { ...process.env, PROTON_AUTH_HELPER_SOCKET: socketPath },
     encoding: 'utf8',
@@ -26,6 +27,7 @@ test('official-core fixture serves bounded RFC codes over a private Unix socket'
     env: {
       ...process.env,
       PROTON_AUTH_HELPER_SOCKET: socketPath,
+      PROTON_AUTH_FIXTURE: '1',
       PROTON_AUTH_FIXTURE_TIME: '59',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -92,4 +94,16 @@ test('official-core fixture serves bounded RFC codes over a private Unix socket'
   assert.equal(afterUnlock.status, 0);
   assert.equal(JSON.parse(afterUnlock.stdout).state, 'ready');
   assert.equal(JSON.parse(afterUnlock.stdout).entries.length, 2);
+});
+
+test('the test fixture server never ships inside the helper tree', () => {
+  assert.equal(fs.existsSync(path.join(root, 'helper', 'fixture-server.mjs')), false);
+  assert.equal(fs.existsSync(fixture), true);
+  const attributes = fs.readFileSync(path.join(root, '.gitattributes'), 'utf8');
+  assert.match(attributes, /^\/tests export-ignore$/m);
+  const source = fs.readFileSync(fixture, 'utf8');
+  assert.match(source, /requires --fixture/);
+  assert.match(source, /PROTON_AUTH_FIXTURE !== '1'/);
+  assert.match(source, /NODE_ENV === 'production'/);
+  assert.match(source, /installed plugin tree/);
 });

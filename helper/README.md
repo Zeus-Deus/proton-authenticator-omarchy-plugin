@@ -34,15 +34,34 @@ systemctl --user enable --now proton-authenticator-omarchy-helper.service
 
 The launcher and unit intentionally resolve to the same installed binary.
 
-`fixture-server.mjs` is test-only. It uses Proton's official published
+`tests/fixtures/fixture-server.mjs` is test-only and lives under `tests/`, never
+under `helper/`. It uses Proton's official published
 `@protontech/authenticator-rust-core` package and the public RFC 6238 test secret
 to prove current/next code rendering without a Proton account. It refuses to
-start without `--fixture` and must never be installed or launched by the plugin.
+start without `--fixture`, without `PROTON_AUTH_FIXTURE=1`, under
+`NODE_ENV=production`, or from a path inside `~/.config/omarchy/plugins/`. It
+must never be installed or launched by the plugin.
+
+`omarchy plugin add` clones the whole repository, so an installed checkout must
+exclude the development tree explicitly. `.gitattributes` marks `/tests` as
+`export-ignore` for archive-based distribution, and a git checkout is narrowed
+with sparse-checkout:
+
+```bash
+plugin_dir=~/.config/omarchy/plugins/io.github.zeus-deus.proton-authenticator
+git -C "$plugin_dir" sparse-checkout set --no-cone '/*' '!/tests'
+```
+
+Verify no fixture reached production:
+
+```bash
+test ! -e "$plugin_dir/tests" && test ! -e "$plugin_dir/helper/fixture-server.mjs"
+```
 
 Install the pinned test dependency and run the integration test:
 
 ```bash
-npm ci --prefix helper --ignore-scripts --no-audit --no-fund
+npm ci --prefix tests/fixtures --ignore-scripts --no-audit --no-fund
 node --test tests/helper.integration.test.js
 ```
 

@@ -1,13 +1,15 @@
 #!/usr/bin/env node
 /** Test-only helper implementing the production line-delimited JSON protocol.
  * Code generation comes from Proton's pinned official Rust/WASM core. This
- * server must never be installed or launched by the production plugin.
+ * server must never be installed, shipped, or launched in production; it lives
+ * under tests/ and refuses to run from an installed plugin tree.
  */
 import fs from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
+import { fileURLToPath } from 'node:url';
 import {
   entry_from_uri,
   generate_code,
@@ -15,7 +17,16 @@ import {
   new_steam_entry_from_params,
 } from '@protontech/authenticator-rust-core/worker/proton_authenticator_web.js';
 
+// Fail-closed guards. Each is independent so a single mistake cannot arm the
+// fixture: an explicit flag, an explicit environment opt-in, a refusal to run
+// from an installed plugin directory, and a refusal under NODE_ENV=production.
 if (!process.argv.includes('--fixture')) throw new Error('fixture server requires --fixture');
+if (process.env.PROTON_AUTH_FIXTURE !== '1') throw new Error('fixture server requires PROTON_AUTH_FIXTURE=1');
+if (process.env.NODE_ENV === 'production') throw new Error('fixture server must not run in production');
+const selfPath = fileURLToPath(import.meta.url);
+if (selfPath.includes(`${path.sep}.config${path.sep}omarchy${path.sep}plugins${path.sep}`)) {
+  throw new Error('fixture server must not run from an installed plugin tree');
+}
 
 const MAX_REQUEST_BYTES = 16 * 1024;
 const fixedTime = BigInt(process.env.PROTON_AUTH_FIXTURE_TIME || '59');
