@@ -167,16 +167,20 @@ Panel {
       }
       onCloseRequested: root.close()
       onTabRequested: function(direction) { root.switchPanel(direction) }
+      // Stronger, one-way action: ask the helper to drop its own copy of the
+      // codes. PanelKeyCatcher already routes `x`/`X` here as its delete verb.
+      onDeleteRequested: authenticator.lock()
       onTextKey: function(text) {
         if (text === "/") searchField.forceActiveFocus()
         else if (text === "r" || text === "R") authenticator.refresh()
         else if (text === "c" || text === "C") root.copySelected()
-        else if (text === "l") {
-          // Panel-local privacy toggle: it never asks the helper to forget.
+        // Lowercase `l` is consumed upstream as the "move right" cursor verb and
+        // never reaches this handler, so the privacy toggle is bound to `L`.
+        // This is a panel-local toggle: it never asks the helper to forget.
+        else if (text === "L") {
           if (authenticator.hidden) authenticator.showCodes()
           else authenticator.hideCodes()
         }
-        else if (text === "L") authenticator.lock()
       }
 
       Flickable {
@@ -328,10 +332,10 @@ Panel {
             width: parent.width
             textFormat: Text.PlainText
             text: root.ready
-              ? "j/k select  ·  enter/c copy  ·  / search  ·  r refresh  ·  l hide"
+              ? "j/k select  ·  enter/c copy  ·  / search  ·  r refresh  ·  L hide"
               : (authenticator.hidden
-                ? "enter/l show codes  ·  shift+l clear helper copy"
-                : "enter sign in  ·  r refresh  ·  shift+l clear helper copy")
+                ? "enter/L show codes  ·  x clear helper copy"
+                : "enter sign in  ·  r refresh  ·  x clear helper copy")
             color: root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption

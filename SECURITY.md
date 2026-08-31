@@ -87,11 +87,11 @@ no `unlock` verb to expose: the helper removed that socket operation entirely.
 
 There are two distinct controls, and they are not the same strength:
 
-- **Panel-local hide (`l`).** The panel stops rendering rows and stops polling
+- **Panel-local hide (`L`).** The panel stops rendering rows and stops polling
   the helper. Nothing is sent over the socket, and **the helper still holds the
   codes** — this hides them from the screen, not from the machine. It is
   reversible from the panel because it never left the panel.
-- **Helper lock (`shift+l`, and the `lock` IPC verb).** The helper clears its
+- **Helper lock (`x`, and the `lock` IPC verb).** The helper clears its
   published snapshot, drops the clipboard owner, and latches itself locked.
   This is one-way: the socket exposes no release operation, so the helper stays
   locked until the helper service restarts.

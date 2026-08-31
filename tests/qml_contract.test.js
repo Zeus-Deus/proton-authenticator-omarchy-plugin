@@ -86,8 +86,11 @@ test('the panel never sends a socket unlock and keeps show-codes panel-local', (
 
 test('the stronger helper-side lock stays reachable and one-way', () => {
   assert.match(service, /function lock\(\)[\s\S]{0,200}"lock"/);
-  assert.match(panel, /text === "L"\) authenticator\.lock\(\)/);
-  assert.match(panel, /text === "l"\)[\s\S]{0,200}authenticator\.hideCodes\(\)/);
+  assert.match(panel, /onDeleteRequested: authenticator\.lock\(\)/);
+  assert.match(panel, /text === "L"\)[\s\S]{0,200}authenticator\.hideCodes\(\)/);
+  // Lowercase `l` is consumed upstream as the cursor's move-right verb and never
+  // reaches onTextKey, so binding the toggle to it would be silently dead.
+  assert.doesNotMatch(panel, /text === "l"/);
 });
 
 test('stale helper snapshots surface as a paused state, not as breakage', () => {

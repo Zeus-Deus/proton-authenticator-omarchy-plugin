@@ -79,15 +79,16 @@ a panel-local control that does not open the Authenticator app.
 - `j` / `k`: select a code.
 - Enter or `c`: ask the helper to copy the selected code.
 - `r`: refresh.
-- `l`: hide or show code rows **in this panel only**. Hiding stops the panel
+- `L`: hide or show code rows **in this panel only**. Hiding stops the panel
   rendering rows and stops it polling the helper; it does not ask the helper to
-  forget anything, and the helper keeps its copy of the codes.
-- `L` (shift+`l`): ask the helper to clear its published snapshot and latch
-  itself locked. This is one-way: the socket has no release operation, so the
-  helper stays locked until the helper service restarts. The socket is
-  owner-private (`0700` parent, `0600` socket, `SO_PEERCRED`), which
-  authenticates the Unix UID — not one specific application. Neither control is
-  a defence against same-UID malware.
+  forget anything, and the helper keeps its copy of the codes. (Lowercase `l` is
+  reserved by Omarchy's panel key handling as a cursor movement key.)
+- `x`: ask the helper to clear its published snapshot and latch itself locked.
+  This is one-way: the socket has no release operation, so the helper stays
+  locked until the helper service restarts. The socket is owner-private (`0700`
+  parent, `0600` socket, `SO_PEERCRED`), which authenticates the Unix UID — not
+  one specific application. Neither control is a defence against same-UID
+  malware.
 - If the helper's publisher stalls, its snapshot expires after 5 seconds and the
   panel shows `Codes paused · waiting for the helper` instead of stale codes.
 - Each row shows the current code, next code, and remaining seconds.
