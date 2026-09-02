@@ -29,10 +29,17 @@ Item {
   property bool synced: false
   property string account: ""
   property int generation: 0
-  // Highest generation seen this session. It never decreases, so closing the
-  // panel cannot erase the privacy-latch floor and let a replayed pre-lock
-  // snapshot repopulate rows on reopen.
+  // Highest generation seen from the current helper process. It never decreases
+  // within one process, so closing the panel cannot erase the privacy-latch
+  // floor and let a replayed pre-lock snapshot repopulate rows on reopen. It
+  // resets only when the helper reports a different `instance` — a new process
+  // starts counting from 1 again, and the only way out of a helper lock is that
+  // restart, so a floor carried across would reject every fresh snapshot.
   property int latchFloor: 0
+  property string helperInstance: ""
+  // Source commit the running helper reports; surfaced through the `status`
+  // IPC verb so a review can check what is actually serving codes.
+  property string helperSourceCommit: ""
   property int now: 0
   property int entryCount: 0
   property var entries: []
@@ -43,11 +50,13 @@ Item {
   readonly property string pluginDir:
     homeDir + "/.config/omarchy/plugins/io.github.zeus-deus.proton-authenticator"
   readonly property string clientPath: pluginDir + "/scripts/helper_client.py"
-  // Absolute interpreter: the shell's PATH contains user-writable directories
-  // ahead of /usr/bin, so a bare "python3" would let one dropped file read
-  // every snapshot and forge helper responses.
+  // Absolute executables only: the shell's PATH contains user-writable
+  // directories ahead of /usr/bin, so a bare "python3" would let one dropped
+  // file read every snapshot and forge helper responses.
   readonly property string pythonBinary: "/usr/bin/python3"
+  readonly property string browserLauncher: "/usr/share/omarchy/bin/omarchy-launch-browser"
   readonly property string helperBinary: homeDir + "/.local/bin/proton-authenticator-omarchy-helper"
+  readonly property string helperCommit: "ce465e3717a54a3639b57d96a935ea5a3f658eed"
   readonly property bool busy: snapshotProcess.running || copyProcess.running || lockProcess.running
 
   signal statusUpdated()
@@ -122,15 +131,15 @@ Item {
 
   function openHelperSource() {
     Quickshell.execDetached([
-      "omarchy-launch-browser",
-      "https://github.com/Zeus-Deus/WebClients/commit/f4793fcfdf15afefe1788a21df71399f729cd265"
+      browserLauncher,
+      "https://github.com/Zeus-Deus/WebClients/commit/" + helperCommit
     ])
   }
 
   function applySnapshot(raw) {
     var next = Model.parseHelperSnapshot(raw)
     if (!panelOpen && next.ok) return
-    if (next.ok && !Model.shouldAcceptGeneration(generation, next.generation)) return
+    if (next.ok && !Model.acceptsSnapshot(helperInstance, generation, next.instance, next.generation)) return
     checked = true
     available = next.ok
     state = next.state
@@ -138,11 +147,20 @@ Item {
     paused = Model.isPaused(next)
     synced = next.synced
     account = next.account
-    latchFloor = Model.latchFloor(latchFloor, next.generation)
-    generation = latchFloor
+    if (next.ok) {
+      var latch = Model.nextLatchState(helperInstance, latchFloor, next.instance, next.generation)
+      helperInstance = latch.instance
+      latchFloor = latch.floor
+      generation = latchFloor
+      helperSourceCommit = next.sourceCommit
+    }
     entryCount = next.entries.length
     now = panelOpen ? next.now : 0
-    entries = panelOpen ? next.entries : []
+    // Reassigning the array recreates every Repeater delegate, which fires the
+    // hover handler under a resting pointer and fights the keyboard cursor once
+    // a second. Only replace it when a row actually changed.
+    var nextEntries = panelOpen ? next.entries : []
+    if (!Model.entriesEqual(entries, nextEntries)) entries = nextEntries
     error = next.error
     statusUpdated()
   }
@@ -189,12 +207,13 @@ Item {
     stdout: StdioCollector { id: lockOut; waitForEnd: true }
     stderr: StdioCollector { waitForEnd: true }
     onExited: function(exitCode) {
-      var response = null
-      try { response = JSON.parse(String(lockOut.text || "")) } catch (e) {}
-      var accepted = exitCode === 0 && response && response.v === 1 && response.ok === true
-        && response.locked === true && Model.shouldAcceptGeneration(root.generation, response.generation)
+      var response = Model.parseLockResponse(String(lockOut.text || ""))
+      var accepted = exitCode === 0 && response.ok
+        && Model.acceptsSnapshot(root.helperInstance, root.generation, response.instance, response.generation)
       if (accepted) {
-        root.latchFloor = Model.latchFloor(root.latchFloor, response.generation)
+        var latch = Model.nextLatchState(root.helperInstance, root.latchFloor, response.instance, response.generation)
+        root.helperInstance = latch.instance
+        root.latchFloor = latch.floor
         root.generation = root.latchFloor
         root.state = "locked"
         root.locked = true

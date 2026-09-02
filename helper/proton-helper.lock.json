@@ -5,7 +5,7 @@
     "fork": "https://github.com/Zeus-Deus/WebClients",
     "baseCommit": "67e20e4f558c6a990444759bc6ebd10f47cab445",
     "helperBranch": "omarchy-authenticator-helper",
-    "helperCommit": "f4793fcfdf15afefe1788a21df71399f729cd265"
+    "helperCommit": "ce465e3717a54a3639b57d96a935ea5a3f658eed"
   },
   "authenticatorRustCore": {
     "package": "@protontech/authenticator-rust-core",

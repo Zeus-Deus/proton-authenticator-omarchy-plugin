@@ -33,12 +33,36 @@ test('panel close clears rows and snapshot output is not retained in a collector
 
 test('the privacy latch floor survives a panel close instead of resetting to zero', () => {
   assert.match(service, /property int latchFloor: 0/);
+  assert.match(service, /property string helperInstance: ""/);
   assert.doesNotMatch(service, /function clearVisibleRows\(\)[\s\S]{0,260}generation = 0/);
   assert.match(service, /function clearVisibleRows\(\)[\s\S]{0,260}latchFloor = Model\.latchFloor\(latchFloor, generation\)/);
   assert.match(service, /function clearVisibleRows\(\)[\s\S]{0,300}generation = latchFloor/);
-  // Every generation write goes through the monotonic floor.
+  // Every generation write goes through the floor: either the plain monotonic
+  // floor (panel close) or the instance-aware one (snapshot / lock responses).
   assert.doesNotMatch(service, /generation = Math\.floor\(Number\(response\.generation\)\)/);
-  assert.equal((service.match(/Model\.latchFloor\(/g) || []).length, 3);
+  assert.doesNotMatch(executableCode, /generation = next\.generation/);
+  assert.doesNotMatch(executableCode, /generation = response\.generation/);
+  assert.equal((service.match(/Model\.latchFloor\(/g) || []).length, 1);
+  assert.equal((service.match(/Model\.nextLatchState\(/g) || []).length, 2);
+  // Acceptance is instance-aware on both paths that can raise the floor.
+  assert.match(service, /if \(next\.ok && !Model\.acceptsSnapshot\(helperInstance, generation, next\.instance, next\.generation\)\) return/);
+  assert.match(service, /Model\.acceptsSnapshot\(root\.helperInstance, root\.generation, response\.instance, response\.generation\)/);
+  assert.doesNotMatch(executableCode, /Model\.shouldAcceptGeneration\(/);
+  // The floor may only reset through Model.nextLatchState; nothing zeroes it.
+  assert.doesNotMatch(executableCode, /latchFloor = 0/);
+  assert.doesNotMatch(executableCode, /helperInstance = ""/);
+});
+
+test('snapshot polling keeps Repeater delegates when rows did not change', () => {
+  assert.match(service, /if \(!Model\.entriesEqual\(entries, nextEntries\)\) entries = nextEntries/);
+  assert.doesNotMatch(service, /function applySnapshot[\s\S]*?\n {4}entries = panelOpen \? next\.entries : \[\]/);
+});
+
+test('every external executable is an absolute path', () => {
+  assert.match(service, /readonly property string browserLauncher:\s*"\/usr\/share\/omarchy\/bin\/omarchy-launch-browser"/);
+  const detached = executableCode.match(/execDetached\(\[[\s\S]*?\]\)/g) || [];
+  assert.equal(detached.length, 2);
+  for (const call of detached) assert.doesNotMatch(call, /\[\s*"[^\/]/);
 });
 
 test('the panel renders current and next codes from validated helper rows', () => {
@@ -84,9 +108,21 @@ test('the panel never sends a socket unlock and keeps show-codes panel-local', (
   assert.match(service, /if \(!panelOpen \|\| hidden \|\|/);
 });
 
-test('the stronger helper-side lock stays reachable and one-way', () => {
+test('the stronger helper-side lock stays reachable, one-way, and confirmed', () => {
   assert.match(service, /function lock\(\)[\s\S]{0,200}"lock"/);
-  assert.match(panel, /onDeleteRequested: authenticator\.lock\(\)/);
+  // `x` opens a confirmation; only the dialog's confirmed signal reaches lock().
+  assert.match(panel, /onDeleteRequested: root\.requestLock\(\)/);
+  assert.doesNotMatch(panel, /onDeleteRequested: authenticator\.lock\(\)/);
+  assert.match(panel, /ConfirmDialog \{[\s\S]*?onConfirmed: \{[\s\S]{0,120}authenticator\.lock\(\)/);
+  const lockCalls = panel.match(/authenticator\.lock\(\)/g) || [];
+  assert.equal(lockCalls.length, 2, 'lock() is reachable from the IPC verb and the confirmed dialog only');
+  // The kit dialog defaults to Confirm; the panel must reset it to Cancel so
+  // `x` then Enter cannot clear the helper.
+  assert.match(panel, /function requestLock\(\)[\s\S]{0,300}lockConfirm\.selectedIndex = 0/);
+  assert.match(panel, /blocked: searchField\.activeFocus \|\| root\.lockConfirmOpen/);
+  assert.match(panel, /message: Model\.LOCK_CONFIRM_MESSAGE/);
+  // Closing the panel discards a pending confirmation.
+  assert.match(panel, /else \{[\s\S]{0,120}lockConfirmOpen = false/);
   assert.match(panel, /text === "L"\)[\s\S]{0,200}authenticator\.hideCodes\(\)/);
   // Lowercase `l` is consumed upstream as the cursor's move-right verb and never
   // reaches onTextKey, so binding the toggle to it would be silently dead.
@@ -137,5 +173,15 @@ test('login handoff launches a fixed helper executable without credentials', () 
 });
 
 test('review action opens the exact pinned helper commit', () => {
-  assert.match(service, /WebClients\/commit\/f4793fcfdf15afefe1788a21df71399f729cd265/);
+  const lock = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'helper', 'proton-helper.lock.json'), 'utf8'));
+  const pinned = lock.protonWebClients.helperCommit;
+  assert.match(pinned, /^[0-9a-f]{40}$/);
+  assert.match(service, new RegExp(`readonly property string helperCommit: "${pinned}"`));
+  assert.match(service, /WebClients\/commit\/" \+ helperCommit/);
+});
+
+test('the scroll target skips the Repeater that precedes the row delegates', () => {
+  assert.match(panel, /var childIndex = selectedIndex \+ 1/);
+  assert.match(panel, /codeColumn\.children\[childIndex\]/);
+  assert.doesNotMatch(panel, /codeColumn\.children\[selectedIndex\]/);
 });

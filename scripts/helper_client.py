@@ -25,15 +25,45 @@ ITEM_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 # `unlock` is absent by design: the helper no longer serves it, and a socket
 # release path would let any same-uid process resume publication of live codes.
 OPS = {"status", "snapshot", "copy", "lock"}
+# Set by `--allow-socket-override`, which only the test suite passes.
+ALLOW_SOCKET_OVERRIDE = False
+# Every error this client can emit. Anything else that escapes (an unexpected
+# exception class, a Python message that happens to quote server bytes) is
+# collapsed to `helper client failure` so no free text reaches the panel.
+KNOWN_ERRORS = {
+    "usage",
+    "unsupported operation",
+    "invalid item id",
+    "item id is only valid for copy",
+    "helper socket override rejected",
+    "helper runtime directory is unavailable",
+    "helper runtime path is not a directory",
+    "helper runtime directory has a foreign owner",
+    "helper runtime directory is not owner-private",
+    "helper socket is unavailable",
+    "helper path is not a socket",
+    "helper socket has a foreign owner",
+    "helper socket is not owner-private",
+    "helper response timeout",
+    "helper response exceeds size limit",
+    "invalid helper response",
+}
 
 
 def socket_path() -> Path:
+    # The override exists for the test suite's mock servers. In production the
+    # shell's environment is not a trust boundary, so honouring it would let
+    # anything that can influence that environment redirect every request. It is
+    # accepted only when the caller also opts in with an explicit flag that the
+    # plugin never passes.
     override = os.environ.get("PROTON_AUTH_HELPER_SOCKET", "").strip()
     if override:
+        if not ALLOW_SOCKET_OVERRIDE:
+            raise RuntimeError("helper socket override rejected")
         return Path(override)
     runtime = os.environ.get("XDG_RUNTIME_DIR", "").strip()
     if not runtime:
-        raise RuntimeError("XDG_RUNTIME_DIR is not set")
+        raise RuntimeError("helper runtime directory is unavailable")
     return Path(runtime) / "proton-authenticator-omarchy" / "helper.sock"
 
 
@@ -115,23 +145,37 @@ def request(op: str, item_id: str = "") -> dict:
                 break
 
     raw = b"".join(chunks).split(b"\n", 1)[0]
-    response = json.loads(raw)
+    try:
+        response = json.loads(raw)
+    except ValueError:
+        raise RuntimeError("invalid helper response") from None
     if not isinstance(response, dict) or response.get("v") != 1 or response.get("id") != request_id:
         raise RuntimeError("invalid helper response")
     return response
 
 
+def error_identifier(error: BaseException) -> str:
+    message = str(error)
+    return message if message in KNOWN_ERRORS else "helper client failure"
+
+
 def main(argv: list[str]) -> int:
-    if len(argv) not in {2, 3}:
-        print('{"v":1,"ok":false,"error":"usage"}')
+    global ALLOW_SOCKET_OVERRIDE
+    args = list(argv[1:])
+    if args and args[0] == "--allow-socket-override":
+        ALLOW_SOCKET_OVERRIDE = True
+        args = args[1:]
+    if len(args) not in {1, 2}:
+        print('{"v":1,"ok":false,"state":"unavailable","error":"usage"}')
         return 2
     try:
-        response = request(argv[1], argv[2] if len(argv) == 3 else "")
+        response = request(args[0], args[1] if len(args) == 2 else "")
         print(json.dumps(response, separators=(",", ":"), ensure_ascii=False))
         return 0 if response.get("ok") is True else 1
     except Exception as error:
-        # Never include server payloads or socket response text in errors.
-        print(json.dumps({"v": 1, "ok": False, "state": "unavailable", "error": str(error)[:160]}, separators=(",", ":")))
+        # Fixed identifiers only: never server payloads, socket text, paths, or
+        # raw Python exception messages.
+        print(json.dumps({"v": 1, "ok": False, "state": "unavailable", "error": error_identifier(error)}, separators=(",", ":")))
         return 1
 
 

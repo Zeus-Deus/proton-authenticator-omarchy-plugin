@@ -51,6 +51,11 @@ claimed until a user completes the interactive acceptance test.
 Runtime requirements: Omarchy Quattro on Wayland, a user systemd session, and
 Omarchy's `wl-clipboard` tools at `/usr/bin/wl-copy` and `/usr/bin/wl-paste`.
 
+Do **not** install Proton's official Linux app alongside the helper. They share
+the `me.proton.authenticator` identifier, data directory, keyring entry, and
+single-instance D-Bus name; see [SECURITY.md](SECURITY.md#single-instance-d-bus-name).
+The helper is the pinned official source plus the socket.
+
 ## Architecture
 
 Quickshell cannot safely host Proton's web frontend: importing `QtWebEngine`
@@ -84,8 +89,10 @@ a panel-local control that does not open the Authenticator app.
   forget anything, and the helper keeps its copy of the codes. (Lowercase `l` is
   reserved by Omarchy's panel key handling as a cursor movement key.)
 - `x`: ask the helper to clear its published snapshot and latch itself locked.
-  This is one-way: the socket has no release operation, so the helper stays
-  locked until the helper service restarts. The socket is owner-private (`0700`
+  A confirmation opens first, defaulting to Cancel. This is one-way: the socket
+  has no release operation, so the helper stays locked until the helper service
+  restarts (`systemctl --user restart proton-authenticator-omarchy-helper`; the
+  panel names this command while locked). The socket is owner-private (`0700`
   parent, `0600` socket, `SO_PEERCRED`), which authenticates the Unix UID — not
   one specific application. Neither control is a defence against same-UID
   malware.
@@ -110,6 +117,14 @@ omarchy-shell proton-authenticator status
 Standalone `qmllint` exits 255 without diagnostics on `Panel.qml` because it
 cannot resolve Omarchy's injected `qs.Ui` / `qs.Commons` types. The manifest
 validator, real shell restart, IPC status, and shell log are the panel gate.
+
+The `status` output includes `helperSourceCommit` (what the running helper was
+built from, as it reports over the socket) and `pinnedHelperCommit` (what this
+plugin expects). They must match; if they do not, the helper on disk is not the
+one this repository documents. Rebuild and install it from the fork with
+`yarn workspace proton-authenticator build:omarchy-helper -- --install`, which
+verifies the artifact, installs it, restarts the unit, and checks the running
+process.
 
 ## Pinned sources
 

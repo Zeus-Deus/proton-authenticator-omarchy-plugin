@@ -12,7 +12,7 @@ const fixture = path.join(root, 'tests', 'fixtures', 'fixture-server.mjs');
 const client = path.join(root, 'scripts', 'helper_client.py');
 
 function runClient(socketPath, args) {
-  return childProcess.spawnSync('/usr/bin/python3', [client, ...args], {
+  return childProcess.spawnSync('/usr/bin/python3', [client, '--allow-socket-override', ...args], {
     cwd: root,
     env: { ...process.env, PROTON_AUTH_HELPER_SOCKET: socketPath },
     encoding: 'utf8',
@@ -24,7 +24,7 @@ function runClient(socketPath, args) {
 // running in-process. Tests with an in-process server must use this variant.
 function runClientAsync(socketPath, args) {
   return new Promise((resolve) => {
-    const child = childProcess.spawn('/usr/bin/python3', [client, ...args], {
+    const child = childProcess.spawn('/usr/bin/python3', [client, '--allow-socket-override', ...args], {
       cwd: root,
       env: { ...process.env, PROTON_AUTH_HELPER_SOCKET: socketPath },
       timeout: 15000,
@@ -290,4 +290,101 @@ test('the test fixture server never ships inside the helper tree', () => {
   assert.match(source, /PROTON_AUTH_FIXTURE !== '1'/);
   assert.match(source, /NODE_ENV === 'production'/);
   assert.match(source, /installed plugin tree/);
+});
+
+test('the socket override is refused unless the caller opts in explicitly', () => {
+  // The plugin never passes --allow-socket-override, so in production an
+  // environment variable cannot redirect the client to another socket, even one
+  // that would pass the ownership checks.
+  const runtime = fs.mkdtempSync(path.join(os.tmpdir(), 'proton-auth-override-'));
+  fs.chmodSync(runtime, 0o700);
+  const socketPath = path.join(runtime, 'helper.sock');
+  const result = childProcess.spawnSync('/usr/bin/python3', [client, 'status'], {
+    cwd: root,
+    env: { ...process.env, PROTON_AUTH_HELPER_SOCKET: socketPath },
+    encoding: 'utf8',
+    timeout: 5000,
+  });
+  fs.rmSync(runtime, { recursive: true, force: true });
+  assert.equal(result.status, 1);
+  const payload = JSON.parse(result.stdout);
+  assert.equal(payload.ok, false);
+  assert.equal(payload.error, 'helper socket override rejected');
+});
+
+test('client errors are fixed identifiers, never raw exception text or paths', () => {
+  const runtime = fs.mkdtempSync(path.join(os.tmpdir(), 'proton-auth-errors-'));
+  fs.chmodSync(runtime, 0o700);
+  const socketPath = path.join(runtime, 'helper.sock');
+  const missing = runClient(socketPath, ['status']);
+  assert.equal(JSON.parse(missing.stdout).error, 'helper socket is unavailable');
+  assert.doesNotMatch(missing.stdout, new RegExp(runtime.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+
+  const usage = runClient(socketPath, []);
+  assert.equal(usage.status, 2);
+  assert.equal(JSON.parse(usage.stdout).error, 'usage');
+  const badOp = runClient(socketPath, ['unlock']);
+  assert.equal(JSON.parse(badOp.stdout).error, 'unsupported operation');
+  const badId = runClient(socketPath, ['copy', '../etc']);
+  assert.equal(JSON.parse(badId.stdout).error, 'invalid item id');
+  fs.rmSync(runtime, { recursive: true, force: true });
+});
+
+test('a restarted helper reports a new instance so the panel floor can reset', async (t) => {
+  const start = (instanceId) => {
+    const runtime = fs.mkdtempSync(path.join(os.tmpdir(), 'proton-auth-instance-'));
+    const socketPath = path.join(runtime, 'helper.sock');
+    const server = childProcess.spawn(process.execPath, ['--experimental-wasm-modules', fixture, '--fixture'], {
+      cwd: root,
+      env: {
+        ...process.env,
+        PROTON_AUTH_HELPER_SOCKET: socketPath,
+        PROTON_AUTH_FIXTURE: '1',
+        PROTON_AUTH_FIXTURE_TIME: '59',
+        PROTON_AUTH_FIXTURE_INSTANCE: instanceId,
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    t.after(() => {
+      server.kill('SIGTERM');
+      fs.rmSync(runtime, { recursive: true, force: true });
+    });
+    const ready = new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('fixture readiness timeout')), 10000);
+      server.stdout.on('data', (chunk) => {
+        if (chunk.toString().includes('"ready":true')) { clearTimeout(timer); resolve(); }
+      });
+      server.on('exit', (code) => { clearTimeout(timer); reject(new Error(`fixture exited ${code}`)); });
+    });
+    return { socketPath, ready };
+  };
+
+  const M = require('../Model.js');
+  const first = start('a'.repeat(32));
+  await first.ready;
+  // Lock the first "process" so the panel floor rises above its generation.
+  const lock = M.parseLockResponse(runClient(first.socketPath, ['lock']).stdout);
+  assert.equal(lock.ok, true);
+  assert.equal(lock.instance, 'a'.repeat(32));
+  let panel = M.nextLatchState('', 0, lock.instance, lock.generation);
+  const replay = M.parseHelperSnapshot(JSON.stringify({
+    v: 1, ok: true, state: 'ready', generation: 1, instance: lock.instance, now: 59, entries: [],
+  }));
+  assert.equal(M.acceptsSnapshot(panel.instance, panel.floor, replay.instance, replay.generation), false,
+    'a pre-lock generation from the same process stays rejected');
+
+  // The helper restarts: a different instance with generation back at 1.
+  const second = start('b'.repeat(32));
+  await second.ready;
+  const fresh = M.parseHelperSnapshot(runClient(second.socketPath, ['snapshot']).stdout);
+  assert.equal(fresh.ok, true);
+  assert.equal(fresh.state, 'ready');
+  assert.equal(fresh.instance, 'b'.repeat(32));
+  assert.ok(fresh.generation <= panel.floor, 'the new process counts from the start again');
+  assert.equal(M.acceptsSnapshot(panel.instance, panel.floor, fresh.instance, fresh.generation), true,
+    'the first snapshot from the new process is accepted');
+  panel = M.nextLatchState(panel.instance, panel.floor, fresh.instance, fresh.generation);
+  assert.equal(panel.reset, true);
+  assert.equal(panel.instance, 'b'.repeat(32));
+  assert.equal(panel.floor, fresh.generation);
 });

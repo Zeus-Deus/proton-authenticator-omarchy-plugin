@@ -18,6 +18,9 @@ Panel {
 
   property int selectedIndex: 0
   property bool cursorActive: false
+  // `x` asks the helper to clear its copy of every code and is irreversible
+  // from the panel, so it goes through a confirmation that defaults to Cancel.
+  property bool lockConfirmOpen: false
   readonly property var filteredEntries: Model.filterEntries(authenticator.entries, searchField.text)
   readonly property color foreground: bar ? bar.foreground : Color.foreground
   readonly property color urgent: bar ? bar.urgent : Color.urgent
@@ -61,8 +64,12 @@ Panel {
 
   function scrollSelectedIntoView() {
     Qt.callLater(function() {
-      if (!codeColumn || selectedIndex < 0 || selectedIndex >= codeColumn.children.length) return
-      var item = codeColumn.children[selectedIndex]
+      // The Repeater is itself a child of the column and sits before its
+      // delegates, so the row for `selectedIndex` is at offset one.
+      var childIndex = selectedIndex + 1
+      if (!codeColumn || selectedIndex < 0 || childIndex >= codeColumn.children.length) return
+      var item = codeColumn.children[childIndex]
+      if (!item || item.height <= 0) return
       var point = item.mapToItem(panelFlick.contentItem, 0, 0)
       var top = point.y
       var bottom = top + item.height
@@ -71,6 +78,20 @@ Panel {
       else if (bottom > panelFlick.contentY + panelFlick.height)
         panelFlick.contentY = Math.min(maxY, bottom - panelFlick.height)
     })
+  }
+
+  function requestLock() {
+    if (lockConfirmOpen) return
+    // The kit's ConfirmDialog defaults to the confirm button; reset to Cancel on
+    // every open so `x` followed by Enter cannot clear the helper.
+    lockConfirm.selectedIndex = 0
+    lockConfirmOpen = true
+    Qt.callLater(function() { confirmKeys.forceActiveFocus() })
+  }
+
+  function closeLockConfirm() {
+    lockConfirmOpen = false
+    Qt.callLater(function() { keyCatcher.forceActiveFocus() })
   }
 
   implicitWidth: button.implicitWidth
@@ -85,6 +106,7 @@ Panel {
       authenticator.refresh()
       Qt.callLater(function() { keyCatcher.forceActiveFocus() })
     } else {
+      lockConfirmOpen = false
       searchField.text = ""
       authenticator.clearVisibleRows()
     }
@@ -122,6 +144,8 @@ Panel {
         paused: authenticator.paused,
         synced: authenticator.synced,
         count: authenticator.entryCount,
+        helperSourceCommit: authenticator.helperSourceCommit,
+        pinnedHelperCommit: authenticator.helperCommit,
         error: authenticator.error
       })
     }
@@ -154,7 +178,7 @@ Panel {
     PanelKeyCatcher {
       id: keyCatcher
       anchors.fill: parent
-      blocked: searchField.activeFocus
+      blocked: searchField.activeFocus || root.lockConfirmOpen
       onMoveRequested: function(dx, dy) {
         if (!root.cursorActive) { root.cursorActive = true; return }
         if (dy !== 0) root.moveCursor(dy)
@@ -168,8 +192,9 @@ Panel {
       onCloseRequested: root.close()
       onTabRequested: function(direction) { root.switchPanel(direction) }
       // Stronger, one-way action: ask the helper to drop its own copy of the
-      // codes. PanelKeyCatcher already routes `x`/`X` here as its delete verb.
-      onDeleteRequested: authenticator.lock()
+      // codes. PanelKeyCatcher already routes `x`/`X` here as its delete verb;
+      // it opens a confirmation rather than locking directly.
+      onDeleteRequested: root.requestLock()
       onTextKey: function(text) {
         if (text === "/") searchField.forceActiveFocus()
         else if (text === "r" || text === "R") authenticator.refresh()
@@ -334,8 +359,8 @@ Panel {
             text: root.ready
               ? "j/k select  ·  enter/c copy  ·  / search  ·  r refresh  ·  L hide"
               : (authenticator.hidden
-                ? "enter/L show codes  ·  x clear helper copy"
-                : "enter sign in  ·  r refresh  ·  x clear helper copy")
+                ? "enter/L show codes  ·  x clear helper copy…"
+                : "enter sign in  ·  r refresh  ·  x clear helper copy…")
             color: root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
@@ -344,6 +369,36 @@ Panel {
           }
 
           Item { width: 1; height: Style.space(2) }
+        }
+      }
+
+      // Confirmation for the irreversible helper lock. Sits above the Flickable
+      // and owns keyboard focus while open; the key catcher is `blocked` so no
+      // panel shortcut can slip through underneath it.
+      FocusScope {
+        id: confirmKeys
+        anchors.fill: parent
+        z: 10
+        visible: root.lockConfirmOpen
+        focus: root.lockConfirmOpen
+        Keys.onPressed: function(event) {
+          if (lockConfirm.handleKey(event)) event.accepted = true
+        }
+
+        ConfirmDialog {
+          id: lockConfirm
+          anchors.fill: parent
+          opened: root.lockConfirmOpen
+          message: Model.LOCK_CONFIRM_MESSAGE
+          cancelText: "Cancel"
+          confirmText: "Clear helper copy"
+          foreground: root.foreground
+          fontFamily: root.fontFamily
+          onCanceled: root.closeLockConfirm()
+          onConfirmed: {
+            root.closeLockConfirm()
+            authenticator.lock()
+          }
         }
       }
     }

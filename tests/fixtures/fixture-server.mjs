@@ -4,6 +4,7 @@
  * server must never be installed, shipped, or launched in production; it lives
  * under tests/ and refuses to run from an installed plugin tree.
  */
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
@@ -45,6 +46,11 @@ steamEntry.id = 'fixture-steam';
 const fixtureEntries = [totpEntry, steamEntry];
 let generation = 1;
 let isLocked = false;
+// Per-process nonce, like the helper's: lets a client tell a restart apart from
+// a replay. Tests may pin it to compare two "processes" deterministically.
+const instance = /^[0-9a-f]{1,64}$/.test(process.env.PROTON_AUTH_FIXTURE_INSTANCE || '')
+  ? process.env.PROTON_AUTH_FIXTURE_INSTANCE
+  : crypto.randomBytes(16).toString('hex');
 // Mirrors the helper's snapshot TTL expiring: set at startup so a test can run
 // a whole process against the degraded shape. There is no socket op for it,
 // because the production helper has none either.
@@ -68,6 +74,7 @@ function snapshot(id) {
       synced: false,
       account: 'RFC fixture',
       generation,
+      instance,
       now: Number(fixedTime),
       coreVersion: library_version(),
       entries: [],
@@ -111,6 +118,7 @@ function snapshot(id) {
     synced: false,
     account: 'RFC fixture',
     generation,
+    instance,
     now,
     coreVersion: library_version(),
     entries,
@@ -132,7 +140,7 @@ function handle(request) {
   if (request.op === 'lock') {
     isLocked = true;
     generation++;
-    return response(id, { ok: true, state: 'locked', locked: true, generation });
+    return response(id, { ok: true, state: 'locked', locked: true, generation, instance });
   }
   // `unlock` is deliberately absent, matching the production helper: it falls
   // through to unsupported_operation like any other unknown op.

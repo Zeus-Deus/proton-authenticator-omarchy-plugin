@@ -34,6 +34,18 @@ the helper must all clear those rows immediately.
 - protocol: one bounded line-delimited JSON request and response;
 - request operations: `status`, `snapshot`, `copy`, `lock`;
 - copy carries only an opaque validated item ID;
+- `status` reports state, counts, a `signedIn` boolean, the helper's per-process
+  `instance`, and the `sourceCommit` the binary was built from. It does **not**
+  report the account: it is the one op a client may call before deciding to
+  trust the socket, so it must not disclose which Proton identity is signed in;
+- every response names the helper's `instance`, a random 128-bit value chosen
+  at process start. Generations restart at 1 with each helper process, and the
+  panel's staleness floor is scoped to one instance: a response from a new
+  instance resets the floor, a response from the same instance can never lower
+  it, and a response with no instance can never reset it. Without this, the
+  helper restart that is the documented way out of a lock would leave the panel
+  silently rejecting every fresh snapshot for as long as the old process had
+  run;
 - responses are capped at 1 MiB of UTF-8 bytes and 200 rows;
 - the helper stamps each publication and treats one older than 5 seconds as
   expired: a `ready` snapshot degrades to `unavailable` with no rows and
@@ -52,6 +64,13 @@ the client separately `lstat`s the socket and its parent before connecting and
 requires a real socket, the current euid as owner, and owner-private modes.
 Both sides also bound the exchange with a wall-clock deadline, because a
 per-`recv` timeout alone can be reset indefinitely by a slow drip.
+
+The client's `PROTON_AUTH_HELPER_SOCKET` override is honoured only together with
+an explicit `--allow-socket-override` flag that the plugin never passes, so the
+shell's environment cannot redirect production requests. Every error the client
+emits is one of a fixed set of identifiers, and the panel maps those to a fixed
+set of messages; raw Python exception text, paths, and server payloads never
+reach the hero or the `status` IPC verb.
 
 ## Explicit prohibitions
 
@@ -94,7 +113,10 @@ There are two distinct controls, and they are not the same strength:
 - **Helper lock (`x`, and the `lock` IPC verb).** The helper clears its
   published snapshot, drops the clipboard owner, and latches itself locked.
   This is one-way: the socket exposes no release operation, so the helper stays
-  locked until the helper service restarts.
+  locked until the helper service restarts
+  (`systemctl --user restart proton-authenticator-omarchy-helper`). In the panel
+  `x` opens a confirmation that defaults to Cancel, so `x` followed by Enter
+  cannot clear the helper; the locked hint names the restart command.
 
 The asymmetry is deliberate. A socket "resume" operation would be callable by
 any same-UID process, so it would be a release path for every process on the
@@ -116,17 +138,41 @@ really removes code material from the helper is fail-safe in one direction.
   screen sharing, and shell crash dumps are residual exposure.
 - Clipboard-manager history is outside the helper's control.
 
+## Single-instance D-Bus name
+
+The helper keeps Proton's `me.proton.authenticator` identifier, so it owns the
+`me.proton.authenticator.SingleInstance` session-bus name. Any same-UID client
+can call that name's `ExecuteCallback` with arbitrary argv; the helper treats
+the forwarded argv as a request, not a command line. Exactly two shapes are
+honoured — no flags (surface the window, as a desktop-entry relaunch would) and
+exactly `--login` (surface Proton's own sign-in modal). Anything else is
+ignored. Neither shape clears the lock latch or touches the snapshot.
+
+Because the identifier, data directory (`~/.local/share/me.proton.authenticator`),
+config, cookie jar, and keyring service name (`com.proton.authenticator`) are
+all shared with Proton's official Linux app, **the official AppImage and the
+helper must not be installed together**: launching the official app while the
+helper runs forwards to the helper and exits, an official app that is already
+running makes the helper exit 0 (which `Restart=on-failure` does not restart),
+and a version drift between the two would run the newer one's database
+migration against the other's data. The helper *is* the pinned official 1.1.6
+source plus the socket; this host runs only the helper.
+
 ## Clipboard
 
 Production copy happens in the helper, not QML. The helper owns one
 `wl-copy --foreground --sensitive` process and terminates that exact process
 after 20 seconds, on replacement, or on privacy lock. External clipboard owners
 are never cleared. Copying the same current code again replaces the owner and
-renews the 20-second window. Clipboard-manager history may retain copied values
-and must be treated as outside the helper's control.
+renews the 20-second window. The helper reports `copied: true` only after the
+child has stayed alive through a short grace period, since a foreground
+`wl-copy` that fails to bind the selection exits immediately. Clipboard-manager
+history may retain copied values and must be treated as outside the helper's
+control.
 
-The background helper disables Proton application logging entirely. Normal
-foreground Proton launches retain upstream logging behavior.
+The background helper logs at Warn and above only, to the journal and Proton's
+log file. Upstream's Debug level records entry IDs and keyring lookups and is
+used only by ordinary foreground launches.
 
 ## Service hardening
 
@@ -143,9 +189,20 @@ WebKitGTK's own bubblewrap sandbox or its JIT, which would be a net security
 loss. The reasoning and the reproduction command for each are recorded in the
 unit file itself.
 
-## Source pinning
+## Source pinning and artifact provenance
 
 `helper/proton-helper.lock.json` pins the exact Proton WebClients commit and the
 official core npm package integrity. Open source enables review; it is not by
 itself proof of safety. Updates require a diff review, cryptographic integrity
 update, and the full test/live-acceptance suite.
+
+The pin alone does not say what is *running*. The helper's `build.rs` embeds the
+source commit into the binary (suffixed `-dirty` when built from an uncommitted
+tree); the build verifier refuses an artifact that does not embed the expected
+commit; `tools/build-omarchy-helper.sh --install` installs the verified file
+atomically, re-verifies the installed path, writes `PROVENANCE`, restarts the
+unit, and checks that the running process executes that path; and the `status`
+socket op reports `sourceCommit`. A review of the helper therefore starts with
+`omarchy-shell proton-authenticator status` and that value, not with the source
+tree — a previous audit cycle reviewed hardening commits that the running binary
+predated.

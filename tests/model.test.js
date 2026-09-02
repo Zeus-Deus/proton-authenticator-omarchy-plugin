@@ -40,6 +40,8 @@ test('parseHelperSnapshot accepts bounded official-core code rows', () => {
     synced: true,
     account: 'user@example.test',
     generation: 7,
+    instance: '',
+    sourceCommit: '',
     now: 59,
     entries: [{
       id: 'fixture-rfc6238',
@@ -183,7 +185,7 @@ test('parseCopyResponse distinguishes a stale refusal from a real failure', () =
 
   // The removed op and malformed output must never read as stale or as success.
   const unsupported = M.parseCopyResponse('{"v":1,"ok":false,"error":"unsupported_operation"}');
-  assert.deepEqual(unsupported, { ok: false, stale: false, error: 'unsupported_operation' });
+  assert.deepEqual(unsupported, { ok: false, stale: false, error: 'Secure helper rejected the request' });
   assert.equal(M.parseCopyResponse('not json').ok, false);
   assert.equal(M.parseCopyResponse('').stale, false);
   // A wrong protocol version is not a success even when it claims one.
@@ -217,6 +219,112 @@ test('panel wording separates panel-local hiding from a cleared helper copy', ()
   // Hidden outranks every other state: a hidden panel shows nothing else.
   assert.equal(M.statusMessage({ checked: true, hidden: true, available: false, paused: true }),
     'Codes hidden in this panel');
-  // Status text is sanitized like every other helper-sourced string.
-  assert.equal(M.statusMessage({ checked: true, available: false, error: 'bad\u202Etext' }), 'badtext');
+  // Error text is never free-form: an unknown identifier (or raw exception
+  // text) collapses to a fixed message, known identifiers map to fixed prose.
+  assert.equal(M.statusMessage({ checked: true, available: false, error: 'bad\u202Etext' }), 'Secure helper unavailable');
+  assert.equal(M.statusMessage({ checked: true, available: false, error: 'maximum recursion depth exceeded while decoding a JSON array' }), 'Secure helper unavailable');
+  assert.equal(M.statusMessage({ checked: true, available: false, error: 'helper socket has a foreign owner' }), 'Secure helper socket failed its safety check');
+  assert.equal(M.statusMessage({ checked: true, available: false, error: 'helper response timeout' }), 'Secure helper did not respond');
+  // The locked hint names the exact recovery command.
+  assert.match(M.hintMessage({ locked: true }), /systemctl --user restart proton-authenticator-omarchy-helper/);
+  assert.match(M.LOCK_CONFIRM_MESSAGE, /cannot be undone/);
+  assert.match(M.LOCK_CONFIRM_MESSAGE, /systemctl --user restart proton-authenticator-omarchy-helper/);
+});
+
+test('the latch floor resets only when the helper reports a different instance', () => {
+  const A = 'a'.repeat(32);
+  const B = 'b'.repeat(32);
+
+  // First contact: adopt the instance and its generation.
+  assert.deepEqual(M.nextLatchState('', 0, A, 5), { instance: A, floor: 5, reset: false });
+  // Same instance: monotonic floor, never decreases.
+  assert.deepEqual(M.nextLatchState(A, 5, A, 3), { instance: A, floor: 5, reset: false });
+  assert.deepEqual(M.nextLatchState(A, 5, A, 9), { instance: A, floor: 9, reset: false });
+  // The helper restarted: generations start over and so does the floor.
+  assert.deepEqual(M.nextLatchState(A, 3600, B, 1), { instance: B, floor: 1, reset: true });
+  // No instance in the response: keep the old floor exactly as before.
+  assert.deepEqual(M.nextLatchState(A, 3600, '', 1), { instance: A, floor: 3600, reset: false });
+  assert.deepEqual(M.nextLatchState('', 3600, '', 1), { instance: '', floor: 3600, reset: false });
+  // A forged instance value that is not lowercase hex is treated as absent.
+  assert.deepEqual(M.nextLatchState(A, 3600, 'not hex!', 1), { instance: A, floor: 3600, reset: false });
+
+  // Acceptance mirrors the same rules. The scenario from the audit: lock at
+  // generation 3600, helper restarts, first snapshot is generation 1.
+  assert.equal(M.acceptsSnapshot(A, 3600, A, 1), false, 'replay against the same process stays rejected');
+  assert.equal(M.acceptsSnapshot(A, 3600, B, 1), true, 'a new process is accepted immediately');
+  assert.equal(M.acceptsSnapshot(A, 3600, '', 1), false, 'an instance-less response cannot reset the floor');
+  assert.equal(M.acceptsSnapshot('', 0, A, 1), true);
+  assert.equal(M.acceptsSnapshot(A, 5, A, 5), true);
+  // A forged out-of-range generation is still rejected on a known instance.
+  assert.equal(M.acceptsSnapshot(A, 5, A, M.MAX_GENERATION + 1), false);
+});
+
+test('instance identifiers and lock responses are validated before use', () => {
+  assert.equal(M.safeInstance('0123456789abcdef0123456789abcdef'), '0123456789abcdef0123456789abcdef');
+  assert.equal(M.safeInstance('ABCDEF'), '');
+  assert.equal(M.safeInstance('../x'), '');
+  assert.equal(M.safeInstance(''), '');
+  assert.equal(M.safeInstance(null), '');
+  assert.equal(M.safeInstance('f'.repeat(65)), '');
+
+  const inst = 'c'.repeat(32);
+  const lock = M.parseLockResponse(JSON.stringify({ v: 1, ok: true, locked: true, generation: 12, instance: inst }));
+  assert.deepEqual(lock, { ok: true, generation: 12, instance: inst });
+  assert.deepEqual(M.parseLockResponse('{"v":1,"ok":true,"locked":false,"generation":12}'), { ok: false, generation: 0, instance: '' });
+  assert.deepEqual(M.parseLockResponse('{"v":1,"ok":false,"error":"unsupported_operation"}'), { ok: false, generation: 0, instance: '' });
+  assert.deepEqual(M.parseLockResponse('garbage'), { ok: false, generation: 0, instance: '' });
+
+  const snap = M.parseHelperSnapshot(JSON.stringify({ v: 1, ok: true, state: 'ready', generation: 1, instance: inst, now: 1, entries: [] }));
+  assert.equal(snap.instance, inst);
+
+  const commit = 'd'.repeat(40);
+  assert.equal(M.safeSourceCommit(commit), commit);
+  assert.equal(M.safeSourceCommit(commit + '-dirty'), commit + '-dirty');
+  assert.equal(M.safeSourceCommit('unknown'), 'unknown');
+  assert.equal(M.safeSourceCommit('<script>'), '');
+  assert.equal(M.safeSourceCommit(commit.toUpperCase()), '');
+  const withCommit = M.parseHelperSnapshot(JSON.stringify({ v: 1, ok: true, state: 'ready', generation: 1, sourceCommit: commit, now: 1, entries: [] }));
+  assert.equal(withCommit.sourceCommit, commit);
+});
+
+test('rows whose window already closed by the helper clock are dropped', () => {
+  const row = (validUntil) => ({
+    id: 'x', name: 'n', issuer: 'i', type: 'Totp', code: '123456', nextCode: '654321', period: 30, validUntil,
+  });
+  const at = (now, rows) => M.parseHelperSnapshot(JSON.stringify({ v: 1, ok: true, state: 'ready', generation: 1, now, entries: rows }));
+  assert.equal(at(59, [row(60)]).entries.length, 1, 'one second left is current');
+  assert.equal(at(60, [row(60)]).entries.length, 0, 'validUntil == now has rolled over');
+  assert.equal(at(61, [row(60)]).entries.length, 0);
+  // A snapshot without a clock keeps the previous behaviour.
+  assert.equal(at(0, [row(60)]).entries.length, 1);
+});
+
+test('entriesEqual detects identical row sets so the panel can keep its delegates', () => {
+  const rows = () => [
+    { id: 'a', name: 'A', issuer: 'I', type: 'Totp', code: '111111', nextCode: '222222', period: 30, validUntil: 60 },
+    { id: 'b', name: 'B', issuer: 'J', type: 'Steam', code: 'PV9M4', nextCode: 'B26KJ', period: 30, validUntil: 60 },
+  ];
+  assert.equal(M.entriesEqual(rows(), rows()), true);
+  assert.equal(M.entriesEqual(rows(), rows().slice(0, 1)), false);
+  const changedCode = rows(); changedCode[0].code = '999999';
+  assert.equal(M.entriesEqual(rows(), changedCode), false);
+  const changedWindow = rows(); changedWindow[1].validUntil = 90;
+  assert.equal(M.entriesEqual(rows(), changedWindow), false);
+  const reordered = rows().reverse();
+  assert.equal(M.entriesEqual(rows(), reordered), false);
+  assert.equal(M.entriesEqual([], []), true);
+  assert.equal(M.entriesEqual(null, []), true);
+});
+
+test('sanitizeText strips the remaining invisible and filler code points', () => {
+  const probes = [
+    '\u2800', '\u034F', '\uFFF9', '\uFFFA', '\uFFFB', '\uFFFC', '\u17B4', '\u17B5',
+    '\uD834\uDD73', '\uD834\uDD7A',           // U+1D173..U+1D17A musical format controls
+    '\uDB40\uDD00', '\uDB40\uDDEF',           // U+E0100..U+E01EF variation selectors
+  ];
+  for (const probe of probes) {
+    assert.equal(M.sanitizeText(`Git${probe}Hub`), 'GitHub', JSON.stringify(probe));
+  }
+  // Legitimate text is untouched.
+  assert.equal(M.sanitizeText('Zürich Bank · Konto'), 'Zürich Bank · Konto');
 });
