@@ -905,12 +905,38 @@ index 0000000000..2827a9cafb
 +    "windows": ["main"],
 +    "permissions": ["updater:default"]
 +}
+diff --git a/applications/authenticator/src-tauri/src/auth.rs b/applications/authenticator/src-tauri/src/auth.rs
+index c08010da68..a028e1c978 100644
+--- a/applications/authenticator/src-tauri/src/auth.rs
++++ b/applications/authenticator/src-tauri/src/auth.rs
+@@ -39,6 +39,13 @@ pub fn log_in(
+     let should_send_destroyed = Arc::new(Mutex::new(true));
+     let should_send_destroyed_clone = should_send_destroyed.clone();
+ 
++    // Under Hyprland (Omarchy) the compositor draws the frame, so drop the GTK
++    // title bar; every other desktop keeps it.
++    #[cfg(target_os = "linux")]
++    let decorations = !crate::helper::use_compositor_decorations();
++    #[cfg(not(target_os = "linux"))]
++    let decorations = true;
++
+     let webview_handle = app.clone();
+     let window = WebviewWindowBuilder::new(&app, "login", WebviewUrl::External(parsed_url.clone()))
+         .theme(tauri_theme)
+@@ -47,6 +54,7 @@ pub fn log_in(
+         .inner_size(400.0, 600.0)
+         .resizable(true)
+         .always_on_top(true)
++        .decorations(decorations)
+         .on_navigation(move |url| {
+             let path = url.path();
+ 
 diff --git a/applications/authenticator/src-tauri/src/helper.rs b/applications/authenticator/src-tauri/src/helper.rs
 new file mode 100644
-index 0000000000..d5aa3e0d3b
+index 0000000000..b7dc463b32
 --- /dev/null
 +++ b/applications/authenticator/src-tauri/src/helper.rs
-@@ -0,0 +1,1459 @@
+@@ -0,0 +1,1479 @@
 +#![cfg(target_os = "linux")]
 +
 +use serde::{Deserialize, Serialize};
@@ -934,7 +960,7 @@ index 0000000000..d5aa3e0d3b
 +const HELPER_API: u8 = 2;
 +// Revision of the Omarchy patch on top of Proton's release. Bumped whenever the
 +// patch changes, independently of Proton's own version.
-+const HELPER_PATCH_REVISION: u32 = 2;
++const HELPER_PATCH_REVISION: u32 = 3;
 +const MAX_REQUEST_BYTES: u64 = 16 * 1024;
 +const MAX_ENTRIES: usize = 200;
 +const MAX_RESPONSE_BYTES: usize = 1024 * 1024;
@@ -967,6 +993,18 @@ index 0000000000..d5aa3e0d3b
 +/// True once the package manager has replaced the binary this process runs
 +/// from (the kernel then reports the old inode as ` (deleted)`). The panel
 +/// uses it to offer a restart instead of silently serving from old code.
++/// Whether Proton's windows should drop their own title bar. Hyprland (and so
++/// Omarchy) manages windows itself, so the GTK title bar with its minimize,
++/// maximize and close buttons only duplicates what the compositor provides.
++/// Every other desktop keeps Proton's normal title bar.
++pub fn use_compositor_decorations() -> bool {
++    compositor_manages_windows(std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").as_deref())
++}
++
++fn compositor_manages_windows(hyprland_signature: Option<&std::ffi::OsStr>) -> bool {
++    hyprland_signature.is_some_and(|value| !value.is_empty())
++}
++
 +pub fn binary_replaced() -> bool {
 +    fs::read_link("/proc/self/exe")
 +        .map(|path| path.to_string_lossy().ends_with(" (deleted)"))
@@ -1814,6 +1852,14 @@ index 0000000000..d5aa3e0d3b
 +
 +#[cfg(test)]
 +mod tests {
++    #[test]
++    fn title_bar_is_dropped_only_under_hyprland() {
++        use std::ffi::OsStr;
++        assert!(super::compositor_manages_windows(Some(OsStr::new("abc_123"))));
++        assert!(!super::compositor_manages_windows(Some(OsStr::new(""))));
++        assert!(!super::compositor_manages_windows(None));
++    }
++
 +    use super::*;
 +
 +    #[derive(Default)]
@@ -2371,7 +2417,7 @@ index 0000000000..d5aa3e0d3b
 +    }
 +}
 diff --git a/applications/authenticator/src-tauri/src/lib.rs b/applications/authenticator/src-tauri/src/lib.rs
-index 1525a1ba2c..55f9869f8d 100644
+index 1525a1ba2c..34192522ed 100644
 --- a/applications/authenticator/src-tauri/src/lib.rs
 +++ b/applications/authenticator/src-tauri/src/lib.rs
 @@ -1,14 +1,16 @@
@@ -2393,7 +2439,7 @@ index 1525a1ba2c..55f9869f8d 100644
  mod storage_key;
  mod store;
  
-@@ -28,11 +30,244 @@ fn apply_webkitgtk_workaround() {
+@@ -28,11 +30,251 @@ fn apply_webkitgtk_workaround() {
      }
  }
  
@@ -2480,8 +2526,15 @@ index 1525a1ba2c..55f9869f8d 100644
 +                let visible = window.is_visible().unwrap_or(true);
 +                if helper::binary_replaced() && !visible {
 +                    log::warn!("[omarchy-helper] binary replaced by an update; restarting");
-+                    app.exit(EXIT_FOR_UPDATE);
-+                    return;
++                    // `AppHandle::exit(code)` ends the event loop with
++                    // `ControlFlow::Exit` and the process then exits 0, which
++                    // `Restart=on-failure` treats as a clean stop. Unlink the
++                    // socket and exit with the status systemd restarts on.
++                    if let Some(path) = app.try_state::<helper::SocketPath>() {
++                        helper::remove_socket(&path.0);
++                    }
++                    app.cleanup_before_exit();
++                    std::process::exit(EXIT_FOR_UPDATE);
 +                }
 +                let backoff_over =
 +                    last_reload.is_none_or(|instant| instant.elapsed() >= RELOAD_BACKOFF);
@@ -2638,7 +2691,7 @@ index 1525a1ba2c..55f9869f8d 100644
      let builder = Builder::<tauri::Wry>::new()
          .commands(collect_commands![
              auth::log_in,
-@@ -54,10 +289,18 @@ pub fn run() {
+@@ -54,10 +296,18 @@ pub fn run() {
          )
          .expect("Failed to export typescript bindings");
  
@@ -2659,13 +2712,17 @@ index 1525a1ba2c..55f9869f8d 100644
              let mut win_builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
                  .title("Proton Authenticator")
                  .user_agent(&auth::get_user_agent(version))
-@@ -65,18 +308,54 @@ pub fn run() {
+@@ -65,18 +315,58 @@ pub fn run() {
                  .inner_size(800.0, 600.0)
                  .min_inner_size(420.0, 480.0);
  
 +            #[cfg(target_os = "linux")]
 +            if background_mode && !login_requested {
 +                win_builder = win_builder.visible(false);
++            }
++            #[cfg(target_os = "linux")]
++            if helper::use_compositor_decorations() {
++                win_builder = win_builder.decorations(false);
 +            }
 +
              if !cfg!(debug_assertions) {
@@ -2716,7 +2773,7 @@ index 1525a1ba2c..55f9869f8d 100644
                  .target(tauri_plugin_log::Target::new(
                      tauri_plugin_log::TargetKind::Stdout,
                  ))
-@@ -88,18 +367,59 @@ pub fn run() {
+@@ -88,18 +378,59 @@ pub fn run() {
                  .build(),
          )
          .plugin(tauri_plugin_window_state::Builder::new().build())

@@ -75,7 +75,7 @@ Item {
   readonly property string setupScript: pluginDir + "/scripts/setup-helper.sh"
   readonly property string systemctl: "/usr/bin/systemctl"
   readonly property string helperUnit: Model.HELPER_UNIT
-  readonly property string helperCommit: "6a8163ca662ed85ec6e4fd0af95a3479461c6516"
+  readonly property string helperCommit: "64bdf0686e5bae7177dfa549940260a39b38b62d"
   readonly property string sourceUrl:
     "https://github.com/Zeus-Deus/proton-authenticator-omarchy-plugin#why-a-patched-helper"
   readonly property bool busy: snapshotProcess.running || copyProcess.running

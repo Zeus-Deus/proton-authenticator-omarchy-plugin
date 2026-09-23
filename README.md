@@ -37,8 +37,17 @@ with one button; the third is your existing Proton account.
 4. Your codes sync in and appear in the panel. The helper keeps running
    hidden.
 
-Proton's windows float, center, and are hidden from screen sharing through a
-window rule the package installs in Omarchy's `default/hypr/apps/`.
+Under Omarchy, Proton's windows float in the middle of the screen without
+their own title bar (Hyprland manages the window), and they are hidden from
+screen sharing and screenshots because they show your 2FA secrets. The package
+installs that window rule in Omarchy's `default/hypr/apps/`. To take a
+screenshot on purpose, for example for documentation:
+
+```
+omarchy-toggle proton-authenticator-screen-share on && hyprctl reload
+# reopen Proton's window, take the screenshot, then:
+omarchy-toggle proton-authenticator-screen-share off && hyprctl reload
+```
 
 ### Updates
 
