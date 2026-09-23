@@ -907,10 +907,10 @@ index 0000000000..2827a9cafb
 +}
 diff --git a/applications/authenticator/src-tauri/src/helper.rs b/applications/authenticator/src-tauri/src/helper.rs
 new file mode 100644
-index 0000000000..f0f95b0701
+index 0000000000..d5aa3e0d3b
 --- /dev/null
 +++ b/applications/authenticator/src-tauri/src/helper.rs
-@@ -0,0 +1,1445 @@
+@@ -0,0 +1,1459 @@
 +#![cfg(target_os = "linux")]
 +
 +use serde::{Deserialize, Serialize};
@@ -934,7 +934,7 @@ index 0000000000..f0f95b0701
 +const HELPER_API: u8 = 2;
 +// Revision of the Omarchy patch on top of Proton's release. Bumped whenever the
 +// patch changes, independently of Proton's own version.
-+const HELPER_PATCH_REVISION: u32 = 1;
++const HELPER_PATCH_REVISION: u32 = 2;
 +const MAX_REQUEST_BYTES: u64 = 16 * 1024;
 +const MAX_ENTRIES: usize = 200;
 +const MAX_RESPONSE_BYTES: usize = 1024 * 1024;
@@ -1408,6 +1408,20 @@ index 0000000000..f0f95b0701
 +#[specta::specta]
 +pub fn take_helper_login_request(state: tauri::State<'_, HelperState>) -> bool {
 +    state.inner().take_login_request()
++}
++
++/// Shows Proton's main window. The web bridge calls this when the panel asks
++/// for sign-in but the account is already signed in, so the user lands on the
++/// app (and its sync settings) instead of nothing happening.
++#[tauri::command]
++#[specta::specta]
++pub fn show_helper_main_window(app: tauri::AppHandle) {
++    use tauri::Manager;
++    if let Some(window) = app.get_webview_window("main") {
++        let _ = window.show();
++        let _ = window.unminimize();
++        let _ = window.set_focus();
++    }
 +}
 +
 +fn socket_path() -> io::Result<PathBuf> {
@@ -2357,7 +2371,7 @@ index 0000000000..f0f95b0701
 +    }
 +}
 diff --git a/applications/authenticator/src-tauri/src/lib.rs b/applications/authenticator/src-tauri/src/lib.rs
-index 1525a1ba2c..0c97a03b8c 100644
+index 1525a1ba2c..55f9869f8d 100644
 --- a/applications/authenticator/src-tauri/src/lib.rs
 +++ b/applications/authenticator/src-tauri/src/lib.rs
 @@ -1,14 +1,16 @@
@@ -2379,14 +2393,16 @@ index 1525a1ba2c..0c97a03b8c 100644
  mod storage_key;
  mod store;
  
-@@ -28,11 +30,234 @@ fn apply_webkitgtk_workaround() {
+@@ -28,11 +30,244 @@ fn apply_webkitgtk_workaround() {
      }
  }
  
 +/// Surfaces Proton's own window for the Omarchy panel (socket `open` op) and
-+/// for forwarded single-instance launches. Login only sets the one-shot request
-+/// and emits the event Proton's Device sync modal listens for; it never clears
-+/// the manual lock latch.
++/// for forwarded single-instance launches. Login does not show the main window:
++/// it sets the one-shot request and emits the event the web bridge answers by
++/// opening Proton's own sign-in window (the same `log_in` path as the app's
++/// "Sign in" button), or the main window when already signed in. It never
++/// clears the manual lock latch.
 +#[cfg(target_os = "linux")]
 +struct TauriWindowControl(tauri::AppHandle);
 +
@@ -2394,8 +2410,15 @@ index 1525a1ba2c..0c97a03b8c 100644
 +fn surface_main_window(app: &tauri::AppHandle, view: helper::OpenView) {
 +    match view {
 +        helper::OpenView::Login => {
++            // A second press while Proton's sign-in window is open focuses it.
++            if let Some(login) = app.get_webview_window("login") {
++                let _ = login.show();
++                let _ = login.set_focus();
++                return;
++            }
 +            app.state::<helper::HelperState>().request_login();
 +            let _ = app.emit_to("main", "omarchy-helper:login", ());
++            return;
 +        }
 +        helper::OpenView::Add => {
 +            let _ = app.emit_to("main", "omarchy-helper:add", ());
@@ -2601,6 +2624,7 @@ index 1525a1ba2c..0c97a03b8c 100644
 +            biometrics::can_check_presence,
 +            biometrics::check_presence,
 +            helper::publish_helper_snapshot,
++            helper::show_helper_main_window,
 +            helper::take_helper_login_request,
 +            storage_key::generate_storage_key,
 +            storage_key::get_storage_key,
@@ -2614,7 +2638,7 @@ index 1525a1ba2c..0c97a03b8c 100644
      let builder = Builder::<tauri::Wry>::new()
          .commands(collect_commands![
              auth::log_in,
-@@ -54,10 +279,18 @@ pub fn run() {
+@@ -54,10 +289,18 @@ pub fn run() {
          )
          .expect("Failed to export typescript bindings");
  
@@ -2635,7 +2659,7 @@ index 1525a1ba2c..0c97a03b8c 100644
              let mut win_builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
                  .title("Proton Authenticator")
                  .user_agent(&auth::get_user_agent(version))
-@@ -65,18 +298,54 @@ pub fn run() {
+@@ -65,18 +308,54 @@ pub fn run() {
                  .inner_size(800.0, 600.0)
                  .min_inner_size(420.0, 480.0);
  
@@ -2692,7 +2716,7 @@ index 1525a1ba2c..0c97a03b8c 100644
                  .target(tauri_plugin_log::Target::new(
                      tauri_plugin_log::TargetKind::Stdout,
                  ))
-@@ -88,18 +357,59 @@ pub fn run() {
+@@ -88,18 +367,59 @@ pub fn run() {
                  .build(),
          )
          .plugin(tauri_plugin_window_state::Builder::new().build())
@@ -2762,31 +2786,43 @@ index 1525a1ba2c..0c97a03b8c 100644
  }
 diff --git a/applications/authenticator/src/app/components/HelperLoginBridge.tsx b/applications/authenticator/src/app/components/HelperLoginBridge.tsx
 new file mode 100644
-index 0000000000..e95183dcd9
+index 0000000000..593cc469a8
 --- /dev/null
 +++ b/applications/authenticator/src/app/components/HelperLoginBridge.tsx
-@@ -0,0 +1,76 @@
-+import { type FC, useEffect, useState } from 'react';
+@@ -0,0 +1,103 @@
++import { type FC, useEffect, useRef } from 'react';
 +
 +import { invoke } from '@tauri-apps/api/core';
 +import { listen } from '@tauri-apps/api/event';
++import { requestFork } from 'proton-authenticator/store/auth';
++import { useAppDispatch, useAppSelector } from 'proton-authenticator/store/utils';
++
++import { ForkType } from '@proton/shared/lib/authentication/fork/constants';
 +
 +import { shouldEnableHelper } from '../../lib/helper/snapshot';
 +import logger from '../../lib/logger';
 +import runtime from '../../lib/tauri/runtime';
-+import { ProtonSyncModal } from './Settings/Sync/ProtonSyncModal';
 +
 +const LOGIN_EVENT = 'omarchy-helper:login';
 +const ADD_EVENT = 'omarchy-helper:add';
 +const TAKE_LOGIN_REQUEST = 'take_helper_login_request';
++const SHOW_MAIN_WINDOW = 'show_helper_main_window';
 +
 +type Props = { onAddRequested?: () => void };
 +
-+/** Surfaces Proton's own UI when the Omarchy panel asks for it: the Device sync
-+ * sign-in modal (`login`) or the add-code dialog (`add`). Nothing here reads or
-+ * forwards credentials; the user types them into Proton's own components. */
++/** Surfaces Proton's own UI when the Omarchy panel asks for it.
++ *
++ * `login` opens Proton's own sign-in window directly, through the same
++ * `requestFork(LOGIN)` call as the app's "Sign in" button, without showing the
++ * main window first. When already signed in it shows the main window instead.
++ * `add` opens the add-code dialog. Nothing here reads or forwards credentials:
++ * the user types them into Proton's hosted sign-in page. */
 +export const HelperLoginBridge: FC<Props> = ({ onAddRequested }) => {
-+    const [open, setOpen] = useState(false);
++    const dispatch = useAppDispatch();
++    const signedIn = useAppSelector((state) => Boolean(state.auth.session));
++    const signedInRef = useRef(signedIn);
++    signedInRef.current = signedIn;
++
 +    const enabled = shouldEnableHelper(
 +        runtime.isTauri,
 +        runtime.platform === 'linux',
@@ -2797,15 +2833,31 @@ index 0000000000..e95183dcd9
 +        if (!enabled) return;
 +        let active = true;
 +        let dispose: undefined | (() => void);
++        let disposeAdd: undefined | (() => void);
 +
-+        const consume = () => {
-+            if (active) setOpen(true);
-+            void invoke<boolean>(TAKE_LOGIN_REQUEST).catch(() => {
-+                logger.error('[omarchy-helper] could not consume login request');
++        const startLogin = () => {
++            if (!active) return;
++            if (signedInRef.current) {
++                void invoke(SHOW_MAIN_WINDOW).catch(() => {
++                    logger.error('[omarchy-helper] could not show the main window');
++                });
++                return;
++            }
++            void dispatch(requestFork(ForkType.LOGIN)).catch(() => {
++                logger.error('[omarchy-helper] could not open the sign-in window');
 +            });
 +        };
 +
-+        let disposeAdd: undefined | (() => void);
++        const consume = () => {
++            void invoke<boolean>(TAKE_LOGIN_REQUEST)
++                .then((requested) => {
++                    if (requested) startLogin();
++                })
++                .catch(() => {
++                    logger.error('[omarchy-helper] could not consume login request');
++                });
++        };
++
 +        void listen(ADD_EVENT, () => {
 +            if (active) onAddRequested?.();
 +        })
@@ -2824,10 +2876,9 @@ index 0000000000..e95183dcd9
 +                    return;
 +                }
 +                dispose = unlisten;
-+                return invoke<boolean>(TAKE_LOGIN_REQUEST);
-+            })
-+            .then((requested) => {
-+                if (active && requested) setOpen(true);
++                // A request made before this page loaded (helper started with
++                // --login) is still waiting in the one-shot flag.
++                consume();
 +            })
 +            .catch(() => {
 +                logger.error('[omarchy-helper] could not initialize login bridge');
@@ -2838,9 +2889,9 @@ index 0000000000..e95183dcd9
 +            dispose?.();
 +            disposeAdd?.();
 +        };
-+    }, [enabled, onAddRequested]);
++    }, [enabled, onAddRequested, dispatch]);
 +
-+    return open ? <ProtonSyncModal onClose={() => setOpen(false)} /> : null;
++    return null;
 +};
 diff --git a/applications/authenticator/src/app/providers/StoreProvider.tsx b/applications/authenticator/src/app/providers/StoreProvider.tsx
 index 2889f3dd39..61e0e93563 100644

@@ -9,7 +9,7 @@
 
 pkgname=proton-authenticator-omarchy-helper
 _protonver=1.1.6
-_patchrev=1
+_patchrev=2
 pkgver=${_protonver}.omarchy${_patchrev}
 pkgrel=1
 pkgdesc='Proton Authenticator (official source + local socket) as a background helper for the Omarchy panel plugin'
@@ -37,7 +37,7 @@ options=(!lto !debug)
 _protoncommit=0deabe38e304f5d42d6a72783c64c1884c17fce3
 # Commit of the patched tree in the reviewable fork; embedded in the binary and
 # reported by the helper so anyone can check what is running.
-_patchcommit=8254c6175512ab7e35bb3c2ac73395b49d3cefde
+_patchcommit=6a8163ca662ed85ec6e4fd0af95a3479461c6516
 # Proton's workspace requires Node ">= 22.14.0 <23.6.0". Arch's Node 22 package
 # (nodejs-lts-jod) conflicts with the system nodejs, which would make a one-press
 # install fail, so the build uses the official Node 22 release tarball instead.
@@ -46,11 +46,13 @@ _nodever=22.23.2
 source=("WebClients-${_protoncommit}.tar.gz::https://github.com/ProtonMail/WebClients/archive/${_protoncommit}.tar.gz"
         "https://nodejs.org/dist/v${_nodever}/node-v${_nodever}-linux-x64.tar.xz"
         omarchy-helper.patch
-        proton-authenticator-omarchy-helper.service)
+        proton-authenticator-omarchy-helper.service
+        proton-authenticator-omarchy-helper.lua)
 sha256sums=('80848edca68c31d97fde946748a0b6c21ed851de80b57f26d8534b4b493ac323'
             'd60acfe00a2932254bb0ad20e01b0d74397a0875595de719654b214f4b03f307'
-            '4b2c9aa036c1b15e6eab35de7bc0a3dcb602f81cb3a4393595f923b2620930f5'
-            '99ab8010bd72b87dc3accda25b08ace2551578f6c16815f4ed61857fa5b07f41')
+            '65d6f7f1cc1e06650e672fa2f673e131368258ef7930f04fd3cbbf343321fbce'
+            '99ab8010bd72b87dc3accda25b08ace2551578f6c16815f4ed61857fa5b07f41'
+            'da9d873121526ca6510e5e47fe0099661d40f46a26cd05545e2f282b2c61b521')
 
 _srcroot() { printf '%s/WebClients-%s' "$srcdir" "$_protoncommit"; }
 
@@ -124,6 +126,10 @@ package() {
         "$pkgdir/usr/bin/proton-authenticator-omarchy-helper"
     install -Dm644 "$srcdir/proton-authenticator-omarchy-helper.service" \
         -t "$pkgdir/usr/lib/systemd/user"
+    # Omarchy loads every file in this directory as a window rule (floating,
+    # centered, hidden from screen sharing), like its other password managers.
+    install -Dm644 "$srcdir/proton-authenticator-omarchy-helper.lua" \
+        -t "$pkgdir/usr/share/omarchy/default/hypr/apps"
     install -Dm644 ../../LICENSE -t "$pkgdir/usr/share/licenses/$pkgname"
     install -Dm644 "$srcdir/omarchy-helper.patch" -t "$pkgdir/usr/share/doc/$pkgname"
 }

@@ -8,9 +8,9 @@
     "baseTarballSha256": "80848edca68c31d97fde946748a0b6c21ed851de80b57f26d8534b4b493ac323",
     "fork": "https://github.com/Zeus-Deus/WebClients",
     "helperBranch": "omarchy-authenticator-helper",
-    "helperCommit": "8254c6175512ab7e35bb3c2ac73395b49d3cefde",
+    "helperCommit": "6a8163ca662ed85ec6e4fd0af95a3479461c6516",
     "patch": "packaging/aur/omarchy-helper.patch",
-    "patchSha256": "4b2c9aa036c1b15e6eab35de7bc0a3dcb602f81cb3a4393595f923b2620930f5"
+    "patchSha256": "65d6f7f1cc1e06650e672fa2f673e131368258ef7930f04fd3cbbf343321fbce"
   },
   "authenticatorRustCore": {
     "package": "@protontech/authenticator-rust-core",
@@ -21,7 +21,7 @@
   "helperApi": 2,
   "package": {
     "name": "proton-authenticator-omarchy-helper",
-    "version": "1.1.6.omarchy1-1",
+    "version": "1.1.6.omarchy2-1",
     "aur": "https://aur.archlinux.org/packages/proton-authenticator-omarchy-helper"
   }
 }

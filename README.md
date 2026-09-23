@@ -30,11 +30,15 @@ with one button; the third is your existing Proton account.
    secure helper**. Omarchy's floating terminal opens and builds the helper
    from Proton's source through the AUR (a few minutes; you type your sudo
    password into that terminal). The helper starts when it finishes.
-3. Press **Sign in with Proton**. Proton's own window opens with its Device
-   sync sign-in: email, password, and your Proton 2FA or security key, exactly
-   as on your phone. The panel never sees any of it.
-4. Your codes sync in and appear in the panel. Close Proton's window; the
-   helper keeps running hidden.
+3. Press **Sign in with Proton**. Proton's own sign-in window opens, floating
+   in the middle of the screen like Omarchy's other password managers: email,
+   password, and your Proton 2FA or security key, exactly as on your phone. It
+   is Proton's hosted sign-in page; the panel never sees any of it.
+4. Your codes sync in and appear in the panel. The helper keeps running
+   hidden.
+
+Proton's windows float, center, and are hidden from screen sharing through a
+window rule the package installs in Omarchy's `default/hypr/apps/`.
 
 ### Updates
 

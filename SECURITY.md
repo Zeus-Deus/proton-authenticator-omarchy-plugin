@@ -168,7 +168,7 @@ The helper keeps Proton's `me.proton.authenticator` identifier, so it owns the
 can call that name's `ExecuteCallback` with arbitrary argv; the helper treats
 the forwarded argv as a request, not a command line. Exactly two shapes are
 honoured — no flags (surface the window, as a desktop-entry relaunch would) and
-exactly `--login` (surface Proton's own sign-in modal). Anything else is
+exactly `--login` (open Proton's own sign-in window). Anything else is
 ignored. Neither shape clears the lock latch or touches the snapshot. Both run
 the same code as the socket's `open` op. The panel itself uses only the
 socket.
