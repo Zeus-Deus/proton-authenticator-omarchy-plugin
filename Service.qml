@@ -256,7 +256,9 @@ Item {
       // body is parsed regardless of exit code and success still requires 0.
       var result = Model.parseCopyResponse(String(copyOut.text || ""))
       if (exitCode !== 0) result.ok = false
-      root.setActionStatus(Model.copyStatusMessage(result))
+      // Success is confirmed on the copied row itself; only a problem is
+      // worth a line in the panel header.
+      if (!result.ok) root.setActionStatus(Model.copyStatusMessage(result))
       if (result.ok) {
         root.copiedId = root.pendingCopyId
         copiedClearTimer.restart()

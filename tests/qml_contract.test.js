@@ -83,8 +83,8 @@ test('the panel renders current and next codes from validated helper rows', () =
 });
 
 test('reopen and search reset the scroll position', () => {
-  assert.match(panel, /if \(opened\) \{[\s\S]{0,180}panelFlick\.contentY = 0/);
-  assert.match(panel, /onTextChanged:[\s\S]{0,100}panelFlick\.contentY = 0/);
+  assert.match(panel, /if \(opened\) \{[\s\S]{0,400}panelFlick\.contentY = 0/);
+  assert.match(panel, /function setFilter\(text\) \{[\s\S]{0,200}panelFlick\.contentY = 0/);
 });
 
 test('ready local state exposes Proton sign-in, add, and manage through the running helper', () => {
@@ -128,23 +128,20 @@ test('the panel never sends a socket unlock and keeps show-codes panel-local', (
 
 test('the stronger helper-side lock stays reachable, one-way, and confirmed', () => {
   assert.match(service, /function lock\(\)[\s\S]{0,200}"lock"/);
-  // `x` opens a confirmation; only the dialog's confirmed signal reaches lock().
-  assert.match(panel, /onDeleteRequested: root\.requestLock\(\)/);
-  assert.doesNotMatch(panel, /onDeleteRequested: authenticator\.lock\(\)/);
+  // Ctrl+X opens a confirmation; only the dialog's confirmed signal reaches lock().
+  assert.match(panel, /key === Qt\.Key_X\) \{ root\.requestLock\(\)/);
   assert.match(panel, /ConfirmDialog \{[\s\S]*?onConfirmed: \{[\s\S]{0,120}authenticator\.lock\(\)/);
   const lockCalls = panel.match(/authenticator\.lock\(\)/g) || [];
   assert.equal(lockCalls.length, 2, 'lock() is reachable from the IPC verb and the confirmed dialog only');
   // The kit dialog defaults to Confirm; the panel must reset it to Cancel so
   // `x` then Enter cannot clear the helper.
   assert.match(panel, /function requestLock\(\)[\s\S]{0,300}lockConfirm\.selectedIndex = 0/);
-  assert.match(panel, /blocked: searchField\.activeFocus \|\| root\.lockConfirmOpen/);
+  // The confirmation owns every key while open, so no shortcut fires under it.
+  assert.match(panel, /if \(root\.lockConfirmOpen\) return\n\s*if \(root\.handleKey\(event\)\)/);
   assert.match(panel, /message: Model\.LOCK_CONFIRM_MESSAGE/);
   // Closing the panel discards a pending confirmation.
   assert.match(panel, /else \{[\s\S]{0,120}lockConfirmOpen = false/);
-  assert.match(panel, /text === "L"\)[\s\S]{0,200}authenticator\.hideCodes\(\)/);
-  // Lowercase `l` is consumed upstream as the cursor's move-right verb and never
-  // reaches onTextKey, so binding the toggle to it would be silently dead.
-  assert.doesNotMatch(panel, /text === "l"/);
+  assert.match(panel, /key === Qt\.Key_H\) \{ root\.toggleHidden\(\)/);
 });
 
 test('stale helper snapshots surface as a paused state, not as breakage', () => {
@@ -245,4 +242,85 @@ test('a copy confirms on the copied row by opaque id and never keeps the code', 
   // The copied marker is cleared with the rows when the panel closes.
   assert.match(service, /function clearVisibleRows\(\)[\s\S]{0,120}copiedId = ""/);
   assert.doesNotMatch(service, /copiedCode|lastCode/);
+});
+
+// Runs the panel's real handleKey() in a VM with recording stubs, so the claim
+// "typing never opens Proton" is checked against the shipped code, not a copy.
+function keyHarness({ ready = true, entries = 3 } = {}) {
+  const vm = require('node:vm');
+  const body = panel.match(/  function handleKey\(event\) \{[\s\S]*?\n  \}\n/)[0];
+  const calls = [];
+  const Qt = {
+    ControlModifier: 0x04000000, ShiftModifier: 0x02000000, AltModifier: 0x08000000, MetaModifier: 0x10000000,
+    Key_Escape: 0x01000000, Key_Tab: 0x01000001, Key_Backtab: 0x01000002, Key_Backspace: 0x01000003,
+    Key_Return: 0x01000004, Key_Enter: 0x01000005, Key_Home: 0x01000010, Key_End: 0x01000011,
+    Key_Up: 0x01000013, Key_Down: 0x01000015, Key_PageUp: 0x01000016, Key_PageDown: 0x01000017,
+  };
+  for (const c of 'ABCDEFGHIJKLMNOPQRSTUVWXYZ') Qt['Key_' + c] = c.charCodeAt(0);
+  const root = {
+    filterText: '', ready, filteredEntries: new Array(entries).fill({}),
+    setFilter(t) { this.filterText = t; calls.push(['filter', t]); },
+    close() { calls.push(['close']); }, switchPanel() { calls.push(['switch']); },
+    activate() { calls.push(['activate']); }, moveCursor(d) { calls.push(['move', d]); },
+    selectAbsolute(i) { calls.push(['select', i]); }, openProton(v) { calls.push(['open', v]); },
+    toggleHidden() { calls.push(['hide']); }, requestLock() { calls.push(['lock']); },
+  };
+  const authenticator = { available: true, entries: new Array(entries).fill({}), refresh() { calls.push(['refresh']); } };
+  const Util = {
+    editsFilter(e, t) { return !!t && e.key === Qt.Key_Backspace; },
+    editedFilter(e, t) { return t.slice(0, -1); },
+  };
+  const ctx = vm.createContext({ Qt, root, authenticator, Util });
+  vm.runInContext(body.replace('function handleKey', 'root.handleKey = function'), ctx);
+  const press = (text, key, modifiers = 0) => ctx.root.handleKey({ text, key: key ?? (text ? text.toUpperCase().charCodeAt(0) : 0), modifiers });
+  return { root, calls, press, Qt };
+}
+
+test('typing any printable key only searches; it never opens Proton or acts', () => {
+  const h = keyHarness();
+  const printable = [];
+  for (let c = 32; c < 127; c++) printable.push(String.fromCharCode(c));
+  for (const ch of printable) {
+    const key = /[a-z]/i.test(ch) ? ch.toUpperCase().charCodeAt(0) : ch.charCodeAt(0);
+    const shift = /[A-Z]/.test(ch) ? h.Qt.ShiftModifier : 0;
+    assert.equal(h.press(ch, key, shift), true);
+  }
+  const actions = h.calls.filter(([verb]) => verb !== 'filter');
+  assert.deepEqual(actions, [], 'a plain key triggered an action');
+  assert.equal(h.root.filterText, printable.join(''));
+});
+
+test('actions live on Ctrl chords and Enter copies the best match', () => {
+  const h = keyHarness();
+  h.press('a', h.Qt.Key_A, h.Qt.ControlModifier);
+  h.press('o', h.Qt.Key_O, h.Qt.ControlModifier);
+  h.press('h', h.Qt.Key_H, h.Qt.ControlModifier);
+  h.press('x', h.Qt.Key_X, h.Qt.ControlModifier);
+  h.press('r', h.Qt.Key_R, h.Qt.ControlModifier);
+  h.press('\r', h.Qt.Key_Return);
+  h.press('', h.Qt.Key_Down);
+  h.press('j', h.Qt.Key_J, h.Qt.ControlModifier);
+  h.press('', h.Qt.Key_Up);
+  assert.deepEqual(h.calls, [['open', 'add'], ['open', 'manage'], ['hide'], ['lock'], ['refresh'],
+    ['activate'], ['move', 1], ['move', 1], ['move', -1]]);
+  // Ctrl+X only asks for confirmation; nothing reaches the helper's lock.
+  assert.doesNotMatch(panel.match(/  function handleKey[\s\S]*?\n  \}\n/)[0], /authenticator\.lock\(/);
+});
+
+test('Escape clears the search before it closes the panel; Backspace edits it', () => {
+  const h = keyHarness();
+  h.press('g'); h.press('h');
+  h.press('', h.Qt.Key_Backspace);
+  assert.equal(h.root.filterText, 'g');
+  h.press('', h.Qt.Key_Escape);
+  assert.equal(h.root.filterText, '');
+  assert.equal(h.calls.some(([verb]) => verb === 'close'), false);
+  h.press('', h.Qt.Key_Escape);
+  assert.deepEqual(h.calls.at(-1), ['close']);
+});
+
+test('with no visible codes, typing does nothing at all', () => {
+  const h = keyHarness({ ready: false, entries: 0 });
+  for (const ch of 'amxLr/') h.press(ch);
+  assert.deepEqual(h.calls, []);
 });

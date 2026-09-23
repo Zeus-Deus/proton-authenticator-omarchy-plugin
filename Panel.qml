@@ -18,10 +18,13 @@ Panel {
 
   property int selectedIndex: 0
   property bool cursorActive: false
+  // Type-to-search: every printable key narrows the list, so letters are
+  // never shortcuts. Actions live on Ctrl chords, which a search never types.
+  property string filterText: ""
   // `x` asks the helper to clear its copy of every code and is irreversible
   // from the panel, so it goes through a confirmation that defaults to Cancel.
   property bool lockConfirmOpen: false
-  readonly property var filteredEntries: Model.filterEntries(authenticator.entries, searchField.text)
+  readonly property var filteredEntries: Model.filterEntries(authenticator.entries, root.filterText)
   readonly property color foreground: bar ? bar.foreground : Color.foreground
   readonly property color urgent: bar ? bar.urgent : Color.urgent
   readonly property color dim: Qt.darker(foreground, 1.55)
@@ -37,6 +40,11 @@ Panel {
   readonly property var primary: Model.primaryAction(authenticator.phase)
 
   function heroMeta() {
+    // The hero's meta line doubles as the search line, so searching costs no
+    // extra space in the panel.
+    if (root.filterText !== "" && root.ready)
+      return "Search  " + root.filterText + "  ·  " + Model.matchCountLabel(root.filteredEntries.length)
+    if (authenticator.actionStatus !== "") return authenticator.actionStatus
     return Model.statusMessage({
       checked: authenticator.checked,
       available: authenticator.available,
@@ -110,6 +118,79 @@ Panel {
     if (entry) authenticator.copyCode(entry.id)
   }
 
+  function setFilter(text) {
+    filterText = String(text || "").slice(0, 80)
+    selectedIndex = 0
+    cursorActive = true
+    panelFlick.contentY = 0
+    pointerGate.reset()
+  }
+
+  function selectAbsolute(index) {
+    if (filteredEntries.length === 0) return
+    cursorActive = true
+    selectedIndex = Math.max(0, Math.min(filteredEntries.length - 1, index))
+    scrollSelectedIntoView()
+  }
+
+  // Enter: copy the highlighted code; signed out with nothing local, start
+  // Proton's sign-in; otherwise run the panel's one setup action.
+  function activate() {
+    if (root.ready && root.filteredEntries.length > 0) root.copySelected()
+    else if (root.ready && root.filterText === "" && !authenticator.synced && authenticator.entryCount === 0) root.openProton("login")
+    else if (!root.ready) root.runAction(root.primary.id)
+  }
+
+  function toggleHidden() {
+    if (authenticator.hidden) authenticator.showCodes()
+    else authenticator.hideCodes()
+  }
+
+  // One keyboard map for the whole panel. Plain printable keys only ever edit
+  // the search, so typing can never open a window or change anything.
+  function handleKey(event) {
+    var key = event.key
+    var mods = event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier | Qt.ShiftModifier)
+    var ctrl = mods === Qt.ControlModifier
+    if (key === Qt.Key_Escape) {
+      if (root.filterText !== "") root.setFilter("")
+      else root.close()
+      return true
+    }
+    if (key === Qt.Key_Tab || key === Qt.Key_Backtab) {
+      root.switchPanel((event.modifiers & Qt.ShiftModifier) || key === Qt.Key_Backtab ? -1 : 1)
+      return true
+    }
+    if (Util.editsFilter(event, root.filterText)) {
+      root.setFilter(Util.editedFilter(event, root.filterText))
+      return true
+    }
+    if (key === Qt.Key_Return || key === Qt.Key_Enter) { root.activate(); return true }
+    if (key === Qt.Key_Down || (ctrl && (key === Qt.Key_J || key === Qt.Key_N))) { root.moveCursor(1); return true }
+    if (key === Qt.Key_Up || (ctrl && (key === Qt.Key_K || key === Qt.Key_P))) { root.moveCursor(-1); return true }
+    if (key === Qt.Key_PageDown) { root.moveCursor(6); return true }
+    if (key === Qt.Key_PageUp) { root.moveCursor(-6); return true }
+    if (key === Qt.Key_Home) { root.selectAbsolute(0); return true }
+    if (key === Qt.Key_End) { root.selectAbsolute(root.filteredEntries.length - 1); return true }
+    if (ctrl) {
+      if (key === Qt.Key_A && authenticator.available) { root.openProton("add"); return true }
+      if (key === Qt.Key_O && authenticator.available) { root.openProton("manage"); return true }
+      if (key === Qt.Key_R) { authenticator.refresh(); return true }
+      if (key === Qt.Key_H) { root.toggleHidden(); return true }
+      // Stronger, one-way action behind a confirmation that defaults to Cancel.
+      if (key === Qt.Key_X) { root.requestLock(); return true }
+      return false
+    }
+    if (mods & (Qt.AltModifier | Qt.MetaModifier)) return false
+    var text = event.text || ""
+    if (text.length === 1 && text.charCodeAt(0) >= 32 && text.charCodeAt(0) !== 127) {
+      // Search only makes sense over visible codes.
+      if (root.ready && authenticator.entries.length > 0) root.setFilter(root.filterText + text)
+      return true
+    }
+    return false
+  }
+
   function scrollSelectedIntoView() {
     Qt.callLater(function() {
       // The Repeater is itself a child of the column and sits before its
@@ -148,14 +229,18 @@ Panel {
   onOpenedChanged: {
     authenticator.panelOpen = opened
     if (opened) {
+      filterText = ""
       selectedIndex = 0
-      cursorActive = false
+      // The top row is highlighted from the start, so typing a few letters
+      // and pressing Enter copies the best match.
+      cursorActive = true
+      pointerGate.reset()
       panelFlick.contentY = 0
       authenticator.refresh()
       Qt.callLater(function() { keyCatcher.forceActiveFocus() })
     } else {
       lockConfirmOpen = false
-      searchField.text = ""
+      filterText = ""
       authenticator.clearVisibleRows()
     }
   }
@@ -167,6 +252,10 @@ Panel {
     id: authenticator
     settings: root.settings
   }
+
+  // Rows move under a resting pointer while the list filters or scrolls; only
+  // deliberate pointer movement may take the highlight from the keyboard.
+  PointerMoveGate { id: pointerGate }
 
   // Quickshell IPC is reachable by any process running as this user; it carries
   // no authentication and `manageIpc: false` adds none. Only verbs that move
@@ -226,39 +315,15 @@ Panel {
     contentWidth: panel.fittedContentWidth(Style.space(430))
     contentHeight: panel.fittedContentHeight(panelFlick.contentHeight, Style.space(620))
 
-    PanelKeyCatcher {
+    Item {
       id: keyCatcher
       anchors.fill: parent
-      blocked: searchField.activeFocus || root.lockConfirmOpen
-      onMoveRequested: function(dx, dy) {
-        if (!root.cursorActive) { root.cursorActive = true; return }
-        if (dy !== 0) root.moveCursor(dy)
-      }
-      onActivateRequested: {
-        if (root.ready && root.filteredEntries.length > 0) root.copySelected()
-        // Signed out with no local codes yet: Enter starts Proton's sign-in.
-        else if (root.ready && !authenticator.synced && authenticator.entryCount === 0) root.openProton("login")
-        else if (!root.ready) root.runAction(root.primary.id)
-      }
-      onCloseRequested: root.close()
-      onTabRequested: function(direction) { root.switchPanel(direction) }
-      // Stronger, one-way action: ask the helper to drop its own copy of the
-      // codes. PanelKeyCatcher already routes `x`/`X` here as its delete verb;
-      // it opens a confirmation rather than locking directly.
-      onDeleteRequested: root.requestLock()
-      onTextKey: function(text) {
-        if (text === "/") searchField.forceActiveFocus()
-        else if (text === "r" || text === "R") authenticator.refresh()
-        else if (text === "c" || text === "C") root.copySelected()
-        else if ((text === "a" || text === "A") && authenticator.available) root.openProton("add")
-        else if ((text === "m" || text === "M") && authenticator.available) root.openProton("manage")
-        // Lowercase `l` is consumed upstream as the "move right" cursor verb and
-        // never reaches this handler, so the privacy toggle is bound to `L`.
-        // This is a panel-local toggle: it never asks the helper to forget.
-        else if (text === "L") {
-          if (authenticator.hidden) authenticator.showCodes()
-          else authenticator.hideCodes()
-        }
+      focus: true
+      Keys.priority: Keys.BeforeItem
+      Keys.onPressed: function(event) {
+        // The confirmation owns every key while it is open.
+        if (root.lockConfirmOpen) return
+        if (root.handleKey(event)) event.accepted = true
       }
 
       Flickable {
@@ -305,35 +370,6 @@ Panel {
             }
           }
 
-          Text {
-            visible: authenticator.actionStatus !== ""
-            width: parent.width
-            textFormat: Text.PlainText
-            text: authenticator.actionStatus
-            color: root.dim
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.bodySmall
-            horizontalAlignment: Text.AlignHCenter
-          }
-
-          TextField {
-            id: searchField
-            visible: root.ready && authenticator.entries.length > 0
-            width: parent.width
-            foreground: root.foreground
-            placeholderText: "Search issuer or account  ·  /"
-            onTextChanged: {
-              root.selectedIndex = 0
-              panelFlick.contentY = 0
-            }
-            onAccepted: keyCatcher.forceActiveFocus()
-            Keys.onEscapePressed: function(event) {
-              text = ""
-              keyCatcher.forceActiveFocus()
-              event.accepted = true
-            }
-          }
-
           PanelSeparator { width: parent.width; foreground: root.foreground }
 
           Column {
@@ -358,7 +394,7 @@ Panel {
               visible: root.filteredEntries.length === 0
               width: parent.width
               textFormat: Text.PlainText
-              text: searchField.text === "" ? "No authenticator codes" : "No matching codes"
+              text: root.filterText === "" ? "No authenticator codes" : "No codes match \u201c" + root.filterText + "\u201d"
               color: root.dim
               font.family: root.fontFamily
               font.pixelSize: Style.font.body
@@ -396,7 +432,7 @@ Panel {
             }
             Button {
               width: (parent.width - parent.spacing) / 2
-              text: "Manage in Proton"
+              text: "Open Proton"
               foreground: root.foreground
               onClicked: root.openProton("manage")
             }
@@ -446,12 +482,12 @@ Panel {
             textFormat: Text.PlainText
             text: root.ready
               ? (authenticator.entryCount === 0 && !authenticator.synced
-                ? "enter sign in  ·  a add  ·  m manage"
-                : "enter copy  ·  / search  ·  a add  ·  m manage  ·  L hide")
+                ? "enter sign in  ·  ctrl+a add  ·  ctrl+o open Proton"
+                : "type to search  ·  enter copy  ·  ctrl+a add  ·  ctrl+o open Proton  ·  ctrl+h hide")
               : (authenticator.hidden
-                ? "enter/L show codes  ·  x clear helper copy…"
+                ? "enter show codes  ·  ctrl+x clear helper copy…"
                 : (root.primary.id !== "" ? "enter " + root.primary.label.toLowerCase() + "  ·  r refresh"
-                                          : "r refresh"))
+                                          : "ctrl+r refresh"))
             color: root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
@@ -499,26 +535,34 @@ Panel {
     id: codeRow
     required property var entry
     required property int rowIndex
-
     readonly property bool copied: authenticator.copiedId !== "" && authenticator.copiedId === entry.id
+    readonly property int remaining: Model.remainingSeconds(codeRow.entry.validUntil, authenticator.now)
+    // The last few seconds of a code: worth waiting for the next one.
+    readonly property bool expiring: remaining > 0 && remaining <= 5
 
     width: parent ? parent.width : implicitWidth
     hasCursor: root.cursorActive && root.selectedIndex === rowIndex
-    // A just-copied row takes the kit's selected fill for a moment, so the
-    // confirmation sits on the code that was copied.
+    // A just-copied row takes the kit's selected fill for a moment.
     current: copied
     foreground: root.foreground
     implicitHeight: rowContent.implicitHeight + Style.space(18)
+
+    onCopiedChanged: if (copied) copyPulse.restart()
 
     MouseArea {
       anchors.fill: parent
       hoverEnabled: true
       cursorShape: Qt.PointingHandCursor
-      onEntered: {
+      onPositionChanged: function(mouse) {
+        if (!pointerGate.moved(codeRow, mouse)) return
         root.cursorActive = true
         root.selectedIndex = codeRow.rowIndex
       }
-      onClicked: authenticator.copyCode(codeRow.entry.id)
+      onClicked: {
+        root.cursorActive = true
+        root.selectedIndex = codeRow.rowIndex
+        authenticator.copyCode(codeRow.entry.id)
+      }
     }
 
     Column {
@@ -540,7 +584,7 @@ Panel {
           Text {
             Layout.fillWidth: true
             textFormat: Text.PlainText
-            text: codeRow.entry.issuer || codeRow.entry.name
+            text: codeRow.entry.issuer || codeRow.entry.name || ""
             color: root.foreground
             font.family: root.fontFamily
             font.pixelSize: Style.font.body
@@ -549,7 +593,7 @@ Panel {
           Text {
             Layout.fillWidth: true
             textFormat: Text.PlainText
-            text: codeRow.entry.name
+            text: codeRow.entry.name || ""
             color: root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
@@ -557,15 +601,33 @@ Panel {
           }
         }
 
+        // Copy confirmation lives on the code itself: a check slides in beside
+        // it and the code gives one short pulse.
+        Text {
+          id: copiedMark
+          textFormat: Text.PlainText
+          text: "\uf00c"
+          color: root.foreground
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.body
+          Layout.alignment: Qt.AlignVCenter
+          Layout.preferredWidth: codeRow.copied ? implicitWidth : 0
+          opacity: codeRow.copied ? 1 : 0
+          Behavior on opacity { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
+          Behavior on Layout.preferredWidth { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
+        }
+
         Text {
           id: codeText
           textFormat: Text.PlainText
-          text: codeRow.entry.code || ""
-          color: root.foreground
+          text: Model.formatCode(codeRow.entry.code)
+          color: codeRow.expiring && !codeRow.copied ? root.urgent : root.foreground
           font.family: root.fontFamily
           font.pixelSize: Style.font.title
           font.letterSpacing: Style.space(1)
           Layout.alignment: Qt.AlignVCenter
+          transformOrigin: Item.Right
+          Behavior on color { ColorAnimation { duration: 200 } }
           // A new code fades in over the old one at rollover.
           onTextChanged: codeFade.restart()
           NumberAnimation {
@@ -576,6 +638,11 @@ Panel {
             to: 1
             duration: 260
             easing.type: Easing.OutCubic
+          }
+          SequentialAnimation {
+            id: copyPulse
+            NumberAnimation { target: codeText; property: "scale"; to: 1.08; duration: 90; easing.type: Easing.OutQuad }
+            NumberAnimation { target: codeText; property: "scale"; to: 1.0; duration: 220; easing.type: Easing.OutBack }
           }
         }
       }
@@ -590,17 +657,17 @@ Panel {
           color: root.dim
           opacity: 0.25
           Rectangle {
-            width: parent.width * Math.max(0, Math.min(1,
-              Model.remainingSeconds(codeRow.entry.validUntil, authenticator.now) / codeRow.entry.period))
+            width: parent.width * Math.max(0, Math.min(1, codeRow.remaining / Math.max(1, codeRow.entry.period || 30)))
             height: parent.height
             radius: parent.radius
-            color: root.foreground
+            color: codeRow.expiring ? root.urgent : root.foreground
+            Behavior on width { NumberAnimation { duration: 950; easing.type: Easing.Linear } }
           }
         }
         Text {
           visible: !codeRow.copied
           textFormat: Text.PlainText
-          text: Model.remainingSeconds(codeRow.entry.validUntil, authenticator.now) + "s"
+          text: codeRow.remaining + "s"
           color: root.dim
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
@@ -610,7 +677,7 @@ Panel {
           textFormat: Text.PlainText
           // Empty for a moment right after a rollover, until the helper
           // publishes the following code.
-          text: "next " + (codeRow.entry.nextCode || "…")
+          text: "next " + (codeRow.entry.nextCode ? Model.formatCode(codeRow.entry.nextCode) : "…")
           color: root.dim
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption

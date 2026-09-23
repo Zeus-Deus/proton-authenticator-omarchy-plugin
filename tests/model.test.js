@@ -453,3 +453,29 @@ test('wheelScroll steps a fixed distance per notch and clamps to the content', (
   assert.equal(M.wheelScroll(0, 300, 400, 0, -120, 84), 0);
   assert.equal(M.wheelScroll('x', undefined, null, NaN, 0, 84), 0);
 });
+
+test('filterEntries is a fuzzy, ranked search over issuer and account', () => {
+  const rows = [['GitHub', 'octo'], ['Proton', 'me@proton.me'], ['Google', 'me@gmail.com'],
+    ['Amazon Web Services', 'root'], ['Cloudflare', 'me@example.com'], ['Gitea', 'home']]
+    .map(([issuer, name], i) => ({ id: String(i), issuer, name }));
+  const q = (query) => M.filterEntries(rows, query).map((row) => row.issuer);
+  assert.deepEqual(q('gh'), ['GitHub']);
+  assert.deepEqual(q('aws'), ['Amazon Web Services']);
+  assert.deepEqual(q('git'), ['GitHub', 'Gitea']);
+  assert.deepEqual(q('cf'), ['Cloudflare']);
+  assert.deepEqual(q('gmail'), ['Google'], 'the account name is searched too');
+  assert.deepEqual(q('me ex'), ['Cloudflare'], 'every term must match');
+  assert.deepEqual(q('zzz'), []);
+  assert.deepEqual(q('  '), rows.map((row) => row.issuer), 'blank shows everything in Proton order');
+  assert.deepEqual(q('\u202Egit'), ['GitHub', 'Gitea'], 'the query is sanitized');
+});
+
+test('formatCode groups digits for display only', () => {
+  assert.equal(M.formatCode('284913'), '284 913');
+  assert.equal(M.formatCode('94287082'), '9428 7082');
+  assert.equal(M.formatCode('PV9M4'), 'PV9M4');
+  assert.equal(M.formatCode(''), '');
+  assert.equal(M.matchCountLabel(0), 'no matches');
+  assert.equal(M.matchCountLabel(1), '1 match');
+  assert.equal(M.matchCountLabel(4), '4 matches');
+});

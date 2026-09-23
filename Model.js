@@ -292,17 +292,71 @@ function entriesEqual(a, b) {
   return true;
 }
 
+// Fuzzy score of one search term against one lower-cased haystack, or -1 when
+// the term's characters do not appear in order. A plain substring always beats
+// a scattered match; matches at the start of a word, and characters that run
+// together, score higher, so "gh" finds GitHub and "aws" finds Amazon Web
+// Services without the user typing the full name.
+function fuzzyTermScore(haystack, term) {
+  var at = haystack.indexOf(term);
+  if (at !== -1) {
+    var wordStart = at === 0 || /[\s@._\-:/()]/.test(haystack.charAt(at - 1));
+    return 10000 - at + (wordStart ? 5000 : 0);
+  }
+  var score = 0;
+  var from = 0;
+  var prev = -2;
+  for (var i = 0; i < term.length; i++) {
+    var found = haystack.indexOf(term.charAt(i), from);
+    if (found === -1) return -1;
+    if (found === prev + 1) score += 30;
+    if (found === 0 || /[\s@._\-:/()]/.test(haystack.charAt(found - 1))) score += 40;
+    score -= found - from;
+    prev = found;
+    from = found + 1;
+  }
+  return 1000 + score;
+}
+
+// Type-to-search over issuer and account name. Every whitespace-separated term
+// must match; rows are ordered best match first and keep their Proton order on
+// a tie. The query is sanitized like any other text before it is used.
 function filterEntries(entries, query) {
   var values = entries instanceof Array ? entries : [];
-  var needle = sanitizeText(query || "", 80).toLowerCase();
-  if (needle === "") return values.slice(0, MAX_HELPER_ENTRIES);
-  var result = [];
-  for (var i = 0; i < values.length && result.length < MAX_HELPER_ENTRIES; i++) {
+  var terms = sanitizeText(query || "", 80).toLowerCase().split(/\s+/).filter(function(term) {
+    return term !== "";
+  });
+  if (terms.length === 0) return values.slice(0, MAX_HELPER_ENTRIES);
+  var scored = [];
+  for (var i = 0; i < values.length; i++) {
     var row = values[i] || {};
-    var haystack = (String(row.name || "") + " " + String(row.issuer || "")).toLowerCase();
-    if (haystack.indexOf(needle) !== -1) result.push(row);
+    var issuer = String(row.issuer || "").toLowerCase();
+    var name = String(row.name || "").toLowerCase();
+    var total = 0;
+    for (var t = 0; t < terms.length && total !== -1; t++) {
+      // The issuer is what people search by, so it gets a small edge.
+      var issuerScore = fuzzyTermScore(issuer, terms[t]);
+      var best = Math.max(issuerScore < 0 ? -1 : issuerScore + 50, fuzzyTermScore(name, terms[t]));
+      total = best < 0 ? -1 : total + best;
+    }
+    if (total !== -1) scored.push({ row: row, score: total, order: i });
   }
-  return result;
+  scored.sort(function(a, b) { return b.score - a.score || a.order - b.order; });
+  return scored.slice(0, MAX_HELPER_ENTRIES).map(function(item) { return item.row; });
+}
+
+function matchCountLabel(count) {
+  var n = Math.max(0, Math.floor(Number(count) || 0));
+  return n === 0 ? "no matches" : (n === 1 ? "1 match" : n + " matches");
+}
+
+// Display-only grouping so a code reads at a glance ("284 913"). The copy path
+// never uses this: the helper copies the code it generated.
+function formatCode(code) {
+  var value = String(code || "");
+  if (!/^\d{6,10}$/.test(value)) return value;
+  var cut = Math.floor(value.length / 2);
+  return value.slice(0, cut) + " " + value.slice(cut);
 }
 
 function clampGeneration(value) {
@@ -566,6 +620,8 @@ if (typeof module !== "undefined" && module.exports) {
     entriesEqual: entriesEqual,
     wheelScroll: wheelScroll,
     filterEntries: filterEntries,
+    formatCode: formatCode,
+    matchCountLabel: matchCountLabel,
     clampGeneration: clampGeneration,
     latchFloor: latchFloor,
     nextLatchState: nextLatchState,
