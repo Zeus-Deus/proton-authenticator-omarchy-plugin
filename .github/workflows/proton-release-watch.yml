@@ -43,6 +43,6 @@ jobs:
           if gh issue list --state open --search "in:title \"$title\"" --json number --jq 'length' | grep -qx 0; then
             gh issue create --title "$title" --body "Proton published Authenticator $LATEST for Linux; the helper package is built from $PINNED.
 
-          Follow [Updating the pinned Proton release](docs/DEVELOPMENT.md#updating-the-pinned-proton-release).
+          Follow [Updating the helper](docs/DEVELOPMENT.md#updating-the-helper).
           Source: https://github.com/ProtonMail/WebClients/tree/release/proton-authenticator@$LATEST"
           fi

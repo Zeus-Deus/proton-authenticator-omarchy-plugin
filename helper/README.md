@@ -2,8 +2,9 @@
 
 The panel's codes come from the helper: Proton's official Authenticator source
 for one release, with one patch that adds a private local socket. It is
-distributed as the AUR package `proton-authenticator-omarchy-helper`; the
-package files live in [`../packaging/aur/`](../packaging/aur/).
+built on the user's machine from the recipe in
+[`../packaging/helper/`](../packaging/helper/) as the local package
+`proton-authenticator-omarchy-helper@local`. It is not an AUR package.
 
 [`proton-helper.lock.json`](proton-helper.lock.json) pins:
 
@@ -14,6 +15,8 @@ package files live in [`../packaging/aur/`](../packaging/aur/).
   `omarchy-authenticator-helper`), embedded in the binary and reported as
   `sourceCommit` over the socket;
 - `patch` / `patchSha256`: the patch the package applies;
+- `recipe`: the SHA-256 of every file in `packaging/helper/`, checked by
+  `scripts/setup-helper.sh` before it builds anything;
 - `helperApi`: the socket feature level this panel expects;
 - `authenticatorRustCore`: the official core package the **test fixture** uses.
 
@@ -21,8 +24,7 @@ The panel installs, starts, and restarts the helper itself (see the README). By
 hand:
 
 ```bash
-omarchy pkg aur add proton-authenticator-omarchy-helper
-systemctl --user enable --now proton-authenticator-omarchy-helper.service
+~/.config/omarchy/plugins/io.github.zeus-deus.proton-authenticator/scripts/setup-helper.sh
 ```
 
 ## Test fixture

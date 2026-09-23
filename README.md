@@ -20,9 +20,9 @@ omarchy plugin add https://github.com/Zeus-Deus/proton-authenticator-omarchy-plu
 Or find it under Setup › Plugins. Then open the panel from the bar:
 
 1. Press **Install secure helper**. Omarchy's floating terminal opens and
-   builds the helper from Proton's official source through the AUR (a few
-   minutes; you type your sudo password there, and it asks before replacing
-   anything).
+   builds the helper from Proton's official source, using the recipe in this
+   repository (a few minutes; you type your sudo password there, and it asks
+   before replacing anything).
 2. Press **Sign in with Proton**. Proton's own sign-in window opens: email,
    password, and your 2FA or security key, the same as on your phone.
 3. Your codes appear. That's it.
@@ -63,20 +63,24 @@ works exactly as on your phone and syncs to your other devices.
 
 ## Updates
 
-The helper is an ordinary AUR package, so **`omarchy update` updates it** with
-everything else. It switches to the new version by itself; your sign-in and
-codes are kept. When Proton releases a new Authenticator version, the package
-is rebuilt from Proton's new source and published.
+`omarchy plugin update` (or Setup › Plugins) updates the plugin. When a plugin
+update comes with a new helper, for example after Proton releases a new
+Authenticator version, the panel shows **Update secure helper**; press it once
+and the helper is rebuilt in the floating terminal. Your sign-in and codes are
+kept.
+
+The helper is deliberately **not** updated by `omarchy update` or the AUR: it
+is only ever built from the exact recipe in the plugin version you installed,
+so it cannot change without the plugin changing.
 
 ## Dependencies
 
 - Omarchy (Quattro shell) on Hyprland, with `wl-clipboard` (installed by
   default).
 - A Proton account with Proton Authenticator.
-- The helper package
-  [`proton-authenticator-omarchy-helper`](https://aur.archlinux.org/packages/proton-authenticator-omarchy-helper)
-  from the AUR. The panel installs it for you (step 1 above); by hand:
-  `omarchy pkg aur add proton-authenticator-omarchy-helper`.
+- The helper, which the panel builds and installs for you (step 1 above) as
+  the local package `proton-authenticator-omarchy-helper@local`. By hand:
+  `~/.config/omarchy/plugins/io.github.zeus-deus.proton-authenticator/scripts/setup-helper.sh`.
 
 The helper replaces Proton's own Linux app (`proton-authenticator`) on the same
 machine, because the two share one data folder and cannot run together. The
@@ -88,7 +92,7 @@ Proton's Linux app has no command line or API, so no other program can read
 codes from it. Rather than re-implement Proton's encryption in the shell, the
 **helper is Proton's own app**, built from Proton's official source for the
 release (`release/proton-authenticator@1.1.6`) with
-[one patch](packaging/aur/omarchy-helper.patch) that:
+[one patch](packaging/helper/omarchy-helper.patch) that:
 
 - adds a private local socket the panel talks to (owner-only, and the helper
   checks the connecting user);
@@ -100,8 +104,12 @@ release (`release/proton-authenticator@1.1.6`) with
 Sign-in, keys, encryption, and sync are Proton's code, unchanged. The patched
 tree is on the
 [`omarchy-authenticator-helper`](https://github.com/Zeus-Deus/WebClients/tree/omarchy-authenticator-helper)
-branch of a WebClients fork, and the package is built and checked from
-[`packaging/aur/`](packaging/aur/).
+branch of a WebClients fork.
+
+The build recipe is [`packaging/helper/`](packaging/helper/). It pins Proton's
+source by full commit and every download and file by SHA-256, and
+[`helper/proton-helper.lock.json`](helper/proton-helper.lock.json) pins the
+recipe files themselves, which the installer checks before building.
 
 ## Security
 
@@ -137,12 +145,17 @@ constants only):
 - `Service.qml`: `/usr/bin/systemctl --user enable --now` or `restart`
   `proton-authenticator-omarchy-helper.service`, from the panel's **Start
   helper** and **Restart helper** buttons.
-- `Service.qml`: **Install secure helper** opens
+- `Service.qml`: **Install secure helper** (and **Update secure helper**) opens
   `omarchy-launch-floating-terminal-with-presentation scripts/setup-helper.sh`.
-  That script runs in a terminal you can see: `omarchy-pkg-aur-add` to
-  install, `yay -S --needed` to update, and `omarchy-pkg-drop` for Proton's own
-  app only after a `gum confirm`. `sudo` is only ever typed by you in that
-  terminal. The plugin itself never runs a package manager or `sudo`.
+  That script runs in a terminal you can see. It checks the files in
+  `packaging/helper/` against the SHA-256 pins in
+  `helper/proton-helper.lock.json`, builds them with `makepkg` in a private
+  temporary directory, and installs the result with `sudo pacman -U`. It
+  removes Proton's own app with `omarchy-pkg-drop` only after a `gum confirm`.
+  Nothing is fetched from the AUR, and the package name ends in `@local`, which
+  no AUR package can have, so `omarchy update` never replaces it. `sudo` is
+  only ever typed by you in that terminal; the plugin itself never runs a
+  package manager or `sudo`.
 - `Service.qml`: **What gets installed?** opens this README's
   [How it works](#how-it-works) section with `omarchy-launch-browser`.
 
@@ -150,7 +163,7 @@ constants only):
 
 ```bash
 systemctl --user disable --now proton-authenticator-omarchy-helper.service
-omarchy pkg drop proton-authenticator-omarchy-helper
+omarchy pkg drop proton-authenticator-omarchy-helper@local
 omarchy plugin remove io.github.zeus-deus.proton-authenticator
 ```
 
@@ -166,6 +179,6 @@ See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) and [SECURITY.md](SECURITY.md).
 
 ## License
 
-The plugin is [MIT](LICENSE). The helper package and its patch are GPL-3.0,
-like Proton Authenticator. No Proton artwork or binaries are in this
+The plugin is [MIT](LICENSE). The helper recipe and its patch
+(`packaging/helper/`) are GPL-3.0, like Proton Authenticator. No Proton artwork or binaries are in this
 repository.

@@ -54,7 +54,8 @@ Item {
   readonly property string phase: Model.setupPhase({
     hidden: hidden, available: available, probe: probe, latched: latched,
     locked: locked, api: helperApi, binaryReplaced: binaryReplaced,
-    paused: paused, state: helperState, synced: synced
+    paused: paused, state: helperState, synced: synced,
+    sourceCommit: helperSourceCommit, pinnedCommit: helperCommit
   })
   property int now: 0
   property int entryCount: 0
@@ -213,7 +214,10 @@ Item {
     }
     // Local install facts decide the fix whenever the helper is missing or
     // too old to report them itself.
-    if (!next.ok || next.api < Model.REQUIRED_HELPER_API) runProbe()
+    // Also once per helper process while it runs, to spot an earlier AUR
+    // build; a switch restarts the helper, which re-checks.
+    var newInstance = next.ok && next.instance !== helperInstance
+    if (!next.ok || next.api < Model.REQUIRED_HELPER_API || probe.ok !== true || newInstance) runProbe()
     paused = Model.isPaused(next)
     synced = next.synced
     account = next.account

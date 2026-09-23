@@ -190,15 +190,47 @@ test('the panel never launches a helper binary of its own', () => {
   assert.doesNotMatch(service, /openView[\s\S]{0,600}(password|token|secret)/i);
 });
 
-test('the pinned helper commit matches the lock file and the AUR package', () => {
+test('the pinned helper commit matches the lock file and the helper recipe', () => {
   const lock = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'helper', 'proton-helper.lock.json'), 'utf8'));
   const pinned = lock.protonWebClients.helperCommit;
   assert.match(pinned, /^[0-9a-f]{40}$/);
   assert.match(service, new RegExp(`readonly property string helperCommit: "${pinned}"`));
-  const pkgbuild = fs.readFileSync(path.join(__dirname, '..', 'packaging', 'aur', 'PKGBUILD'), 'utf8');
+  const pkgbuild = fs.readFileSync(path.join(__dirname, '..', 'packaging', 'helper', 'PKGBUILD'), 'utf8');
   assert.match(pkgbuild, new RegExp(`^_patchcommit=${pinned}$`, 'm'));
   assert.match(pkgbuild, new RegExp(`^_protoncommit=${lock.protonWebClients.baseCommit}$`, 'm'));
   assert.match(pkgbuild, new RegExp(`^_protonver=${lock.protonWebClients.protonVersion.replace(/\./g, '\\.')}$`, 'm'));
+});
+
+test('the installer builds only the reviewed recipe, pinned file by file', () => {
+  const root = path.join(__dirname, '..');
+  const lock = JSON.parse(fs.readFileSync(path.join(root, 'helper', 'proton-helper.lock.json'), 'utf8'));
+  const crypto = require('node:crypto');
+  const recipeDir = path.join(root, 'packaging', 'helper');
+  const shipped = fs.readdirSync(recipeDir).map((f) => `packaging/helper/${f}`).sort();
+  assert.deepEqual(Object.keys(lock.recipe).sort(), shipped, 'every recipe file is pinned, and nothing else');
+  for (const [file, digest] of Object.entries(lock.recipe)) {
+    const actual = crypto.createHash('sha256').update(fs.readFileSync(path.join(root, file))).digest('hex');
+    assert.equal(actual, digest, file);
+  }
+  const pkgbuild = fs.readFileSync(path.join(recipeDir, 'PKGBUILD'), 'utf8');
+  // '@' cannot appear in an AUR package name, so no AUR update can replace it.
+  assert.match(pkgbuild, /^pkgname=proton-authenticator-omarchy-helper@local$/m);
+  assert.equal(lock.package.name, 'proton-authenticator-omarchy-helper@local');
+  const [ver, rel] = lock.package.version.split('-');
+  assert.match(pkgbuild, new RegExp(`^pkgrel=${rel}$`, 'm'));
+  assert.equal(ver, `${lock.protonWebClients.protonVersion}.omarchy${pkgbuild.match(/^_patchrev=(\d+)$/m)[1]}`);
+  // Remote sources are pinned by a full commit or a checksum, never 'SKIP'.
+  const sums = pkgbuild.match(/^sha256sums=\(([\s\S]*?)\)/m)[1].match(/'[^']*'/g);
+  const sources = pkgbuild.match(/^source=\(([\s\S]*?)\)$/m)[1].trim().split(/\s+/);
+  assert.equal(sums.length, sources.length);
+  for (const sum of sums) assert.match(sum, /^'[0-9a-f]{64}'$/);
+  const setup = fs.readFileSync(path.join(root, 'scripts', 'setup-helper.sh'), 'utf8');
+  assert.doesNotMatch(setup, /\byay\b|\bparu\b|omarchy-pkg-aur|aur\.archlinux\.org/);
+  assert.match(setup, /lock\["recipe"\]/);
+  assert.match(setup, /makepkg --syncdeps --noconfirm/);
+  // sudo is asked once before the long build, not after it (a prompt at the
+  // end times out while the user is away).
+  assert.ok(setup.indexOf('sudo -v') !== -1 && setup.indexOf('sudo -v') < setup.indexOf('makepkg'));
 });
 
 test('every setup phase has a reachable panel action', () => {
@@ -210,8 +242,8 @@ test('every setup phase has a reachable panel action', () => {
   assert.match(service, /function runSetup\(mode\)/);
   assert.match(service, /function startHelper\(\)/);
   assert.match(service, /function restartHelper\(\)/);
-  // The probe runs only when the socket is down.
-  assert.match(service, /if \(!next\.ok \|\| next\.api < Model\.REQUIRED_HELPER_API\) runProbe\(\)/);
+  // The probe runs when the socket is down, and once per helper process.
+  assert.match(service, /if \(!next\.ok \|\| next\.api < Model\.REQUIRED_HELPER_API \|\| probe\.ok !== true \|\| newInstance\) runProbe\(\)/);
 });
 
 test('the scroll target skips the Repeater that precedes the row delegates', () => {

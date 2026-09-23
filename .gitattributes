@@ -1,8 +1,8 @@
 # Development-only paths. Archive-based distribution (marketplace snapshots,
 # release tarballs) must not carry the test fixture server or its npm tree into
 # a production plugin directory. Hard rule 6: never install the fixture server.
+# packaging/helper is NOT excluded: the installer builds the helper from it.
 /tests export-ignore
 /docs export-ignore
-/packaging export-ignore
 /.github export-ignore
 /.gitattributes export-ignore

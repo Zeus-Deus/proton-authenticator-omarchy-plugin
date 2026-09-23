@@ -1,13 +1,16 @@
-# Maintainer: Zeus-Deus <github.commits at widow dot cc>
-#
 # Proton Authenticator built from Proton's official source for the release
 # (ProtonMail/WebClients, branch release/proton-authenticator@<version>) with
 # one reviewable patch, omarchy-helper.patch, that adds a private local socket
 # so the Omarchy panel plugin can show and copy codes. Login, keys, encryption
-# and sync are Proton's code, unchanged. See the patch header in the plugin repo
-# README ("How it works") for exactly what it changes.
+# and sync are Proton's code, unchanged. See the README ("How it works").
+#
+# This PKGBUILD is built locally by scripts/setup-helper.sh from the plugin's
+# own reviewed checkout; it is not published to the AUR. The '@local' suffix is
+# deliberate: AUR package names cannot contain '@', so no AUR package can ever
+# share this name, and AUR helpers (yay in `omarchy update`) never replace it.
+# Every input below is pinned to a full commit or a SHA-256.
 
-pkgname=proton-authenticator-omarchy-helper
+pkgname=proton-authenticator-omarchy-helper@local
 _protonver=1.1.6
 _patchrev=5
 pkgver=${_protonver}.omarchy${_patchrev}
@@ -27,10 +30,13 @@ depends=(cairo
          webkit2gtk-4.1
          wl-clipboard)
 makedepends=(cargo)
-install=$pkgname.install
+install=proton-authenticator-omarchy-helper.install
 # Same app identifier, data directory, keyring entry and single-instance D-Bus
 # name as Proton's own Linux app: the two cannot run side by side.
-conflicts=(proton-authenticator proton-authenticator-bin proton-authenticator-git)
+# The plain name is the earlier AUR build of this helper, which setup-helper.sh
+# swaps for this build in one pacman transaction.
+conflicts=(proton-authenticator proton-authenticator-bin proton-authenticator-git
+           proton-authenticator-omarchy-helper)
 options=(!lto !debug)
 
 # Proton's release-branch head for 1.1.6 ("Bump Authenticator to 1.1.6").
@@ -130,6 +136,6 @@ package() {
     # centered, hidden from screen sharing), like its other password managers.
     install -Dm644 "$srcdir/proton-authenticator-omarchy-helper.lua" \
         -t "$pkgdir/usr/share/omarchy/default/hypr/apps"
-    install -Dm644 ../../LICENSE -t "$pkgdir/usr/share/licenses/$pkgname"
-    install -Dm644 "$srcdir/omarchy-helper.patch" -t "$pkgdir/usr/share/doc/$pkgname"
+    install -Dm644 ../../LICENSE -t "$pkgdir/usr/share/licenses/proton-authenticator-omarchy-helper"
+    install -Dm644 "$srcdir/omarchy-helper.patch" -t "$pkgdir/usr/share/doc/proton-authenticator-omarchy-helper"
 }

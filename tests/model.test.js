@@ -380,6 +380,16 @@ test('setupPhase maps every helper situation to exactly one next step', () => {
   assert.equal(M.statusMessage(Object.assign({ checked: true }, up, { api: 0, probe: probe({ unit: 'active' }) })), 'Update installed · restart pending');
   assert.equal(M.statusMessage(Object.assign({ checked: true }, up, { api: 0, probe: probe({ installed: false }) })), 'Secure helper needs an update');
   assert.equal(phase(Object.assign({}, up, { binaryReplaced: true })), 'restart');
+  // A helper built from a different commit than this plugin pins: rebuild.
+  const pin = 'a'.repeat(40);
+  assert.equal(phase(Object.assign({}, up, { pinnedCommit: pin, sourceCommit: 'b'.repeat(40) })), 'update');
+  assert.equal(phase(Object.assign({}, up, { pinnedCommit: pin, sourceCommit: pin })), 'ready');
+  // Unknown or malformed commits never force a rebuild.
+  for (const odd of ['', 'unknown', `${'b'.repeat(40)}-dirty`, 'rm -rf', undefined])
+    assert.equal(phase(Object.assign({}, up, { pinnedCommit: pin, sourceCommit: odd })), 'ready', String(odd));
+  // An earlier AUR build: switch to the reviewed recipe's build.
+  assert.equal(phase(Object.assign({}, up, { pinnedCommit: pin, sourceCommit: pin, probe: probe({ aurBuild: true }) })), 'migrate');
+  assert.equal(M.primaryAction('migrate').id, 'install');
   assert.equal(phase(Object.assign({}, up, { latched: true, locked: true, state: 'locked' })), 'locked');
   // The latch outranks an outdated helper: its recovery (restart) comes first.
   assert.equal(phase(Object.assign({}, up, { latched: true, api: 1 })), 'locked');
@@ -403,10 +413,11 @@ test('setupPhase maps every helper situation to exactly one next step', () => {
 
 test('parseProbe accepts only the fixed probe shape', () => {
   assert.deepEqual(M.parseProbe('{"v":1,"ok":true,"installed":true,"unit":"active","legacy":false,"conflict":false}'),
-    { ok: true, installed: true, unit: 'active', legacy: false, conflict: false });
+    { ok: true, installed: true, unit: 'active', legacy: false, conflict: false, aurBuild: false });
+  assert.equal(M.parseProbe('{"v":1,"ok":true,"installed":true,"unit":"active","legacy":false,"conflict":false,"aurBuild":true}').aurBuild, true);
   // Unknown unit states and non-boolean flags collapse to safe values.
   assert.deepEqual(M.parseProbe('{"v":1,"ok":true,"installed":"yes","unit":"rm -rf","legacy":1,"conflict":null}'),
-    { ok: true, installed: false, unit: 'unknown', legacy: false, conflict: false });
+    { ok: true, installed: false, unit: 'unknown', legacy: false, conflict: false, aurBuild: false });
   for (const bad of ['', 'nope', '{"v":2,"ok":true}', '{"v":1,"ok":false}', '[]'])
     assert.equal(M.parseProbe(bad).ok, false, bad);
 });

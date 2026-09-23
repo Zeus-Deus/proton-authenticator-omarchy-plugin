@@ -9,7 +9,7 @@
     "fork": "https://github.com/Zeus-Deus/WebClients",
     "helperBranch": "omarchy-authenticator-helper",
     "helperCommit": "5a417199bc791bfdad27db290153c763da5182ab",
-    "patch": "packaging/aur/omarchy-helper.patch",
+    "patch": "packaging/helper/omarchy-helper.patch",
     "patchSha256": "65c73c916943d1c56d5254d8fdfae7c2e56b73c2e35b0fb5412950a3849673d0"
   },
   "authenticatorRustCore": {
@@ -20,8 +20,15 @@
   "officialCoreDependencyUsedByFixtureOnly": true,
   "helperApi": 2,
   "package": {
-    "name": "proton-authenticator-omarchy-helper",
+    "name": "proton-authenticator-omarchy-helper@local",
     "version": "1.1.6.omarchy5-1",
-    "aur": "https://aur.archlinux.org/packages/proton-authenticator-omarchy-helper"
+    "builtFrom": "packaging/helper/PKGBUILD by scripts/setup-helper.sh"
+  },
+  "recipe": {
+    "packaging/helper/PKGBUILD": "49942b094f97e3e9598eb1d1359519de6d01e710e046b5fd57e2b40ec44d8557",
+    "packaging/helper/omarchy-helper.patch": "65c73c916943d1c56d5254d8fdfae7c2e56b73c2e35b0fb5412950a3849673d0",
+    "packaging/helper/proton-authenticator-omarchy-helper.install": "ea91956a84c32b606029fc11106106c73d51ca135e26f465f569b17e572b1574",
+    "packaging/helper/proton-authenticator-omarchy-helper.lua": "53e424d7bf68cc102dd8595e3dea92a1dd51f5a9a46d499ac7cf1df14ba89e92",
+    "packaging/helper/proton-authenticator-omarchy-helper.service": "99ab8010bd72b87dc3accda25b08ace2551578f6c16815f4ed61857fa5b07f41"
   }
 }

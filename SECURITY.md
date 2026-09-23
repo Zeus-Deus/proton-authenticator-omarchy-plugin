@@ -2,7 +2,7 @@
 
 ## Status
 
-The helper has been built as the real AUR package and exercised end to end
+The helper has been built from the plugin's recipe and exercised end to end
 with a real Proton account: sign-in (email, password, 2FA), sync from a phone,
 code rollover, and copy. The test fixture uses only public RFC 6238 secrets and
 must never be used with real ones.
@@ -99,8 +99,9 @@ reach the hero or the `status` IPC verb.
 - no direct reads of Proton IndexedDB/keyring from QML;
 - no private Proton API implementation in QML;
 - no background runtime downloads or unpinned helper updates: Proton's in-app
-  updater is disabled on Linux, and the helper changes only when the package
-  manager installs a new version of the AUR package;
+  updater is disabled on Linux, and the helper changes only when the user
+  presses **Update secure helper** after a plugin update brings a new pinned
+  recipe. It is not an AUR package, so `omarchy update` never touches it;
 - the panel never runs a package manager or sudo itself. **Install secure
   helper** opens Omarchy's floating terminal on `scripts/setup-helper.sh`, where
   the user sees each step and types sudo; the only argument is a fixed mode
@@ -181,7 +182,7 @@ helper runs forwards to the helper and exits, an official app that is already
 running makes the helper exit 0 (which `Restart=on-failure` does not restart),
 and a version drift between the two would run the newer one's database
 migration against the other's data. The helper *is* the pinned official 1.1.6
-source plus the socket; this host runs only the helper. The AUR package
+source plus the socket; this host runs only the helper. The helper package
 declares `conflicts=` on Proton's packages, and the installer offers to remove
 them.
 
@@ -230,12 +231,22 @@ unit file itself.
 
 `helper/proton-helper.lock.json` pins Proton's release (`1.1.6`, release-branch
 commit `0deabe38…`), the SHA-256 of Proton's source tarball for that commit,
-the patch file and its SHA-256, the patched-tree commit, and the official core
-npm package integrity. The AUR `PKGBUILD` (a copy is in `packaging/aur/`)
-verifies the tarball, the Node toolchain, the patch, and the unit by SHA-256
-before building; `cargo fetch --locked` and Proton's own `yarn.lock` pin every
-dependency. A contract test fails if the panel, the lock file, and the
-`PKGBUILD` disagree on any of these.
+the patch file and its SHA-256, the patched-tree commit, the SHA-256 of every
+file in the helper recipe (`packaging/helper/`), and the official core npm
+package integrity. The installer refuses to build if any recipe file differs
+from its pin. The `PKGBUILD` verifies the tarball, the Node toolchain, the
+patch, the unit, and the window rule by SHA-256 before building;
+`cargo fetch --locked` and Proton's own `yarn.lock` pin every dependency. A
+contract test fails if the panel, the lock file, and the `PKGBUILD` disagree
+on any of these.
+
+The helper is built only from the recipe in the installed plugin checkout,
+never from the AUR or another mutable source, so it cannot change without a
+new plugin commit. Its package name, `proton-authenticator-omarchy-helper@local`,
+contains `@`, which AUR package names cannot, so no AUR package can take its
+place during `omarchy update`. An earlier release installed the helper from the
+AUR under the plain name; the panel detects that build and offers to switch it
+to the reviewed one.
 
 Open source enables review; it is not by itself proof of safety, and a build
 from source cannot carry Proton's signature. Updates require a diff review of

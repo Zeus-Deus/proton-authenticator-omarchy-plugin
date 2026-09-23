@@ -413,7 +413,7 @@ function parseProbe(text) {
   var data = null;
   try { data = JSON.parse(String(text || "")); } catch (e) { data = null; }
   if (!data || typeof data !== "object" || data.v !== 1 || data.ok !== true)
-    return { ok: false, installed: false, unit: "unknown", legacy: false, conflict: false };
+    return { ok: false, installed: false, unit: "unknown", legacy: false, conflict: false, aurBuild: false };
   var units = { active: true, activating: true, inactive: true, failed: true, deactivating: true };
   var unit = String(data.unit || "");
   return {
@@ -421,17 +421,20 @@ function parseProbe(text) {
     installed: data.installed === true,
     unit: units[unit] ? unit : "unknown",
     legacy: data.legacy === true,
-    conflict: data.conflict === true
+    conflict: data.conflict === true,
+    aurBuild: data.aurBuild === true
   };
 }
 
 // Single source of truth for what the panel shows and what its main button
 // does. Each phase has exactly one primary action.
 //   install   — helper package missing (or a conflicting Proton app is)
-//   migrate   — only the old hand-built development helper is present
+//   migrate   — the old hand-built development helper, or an earlier AUR
+//               build, is present; switch to the reviewed recipe's build
 //   start     — package installed, service not running
 //   starting  — service running, socket not up yet
-//   update    — running helper is older than this panel needs
+//   update    — running helper is older than, or built from a different
+//               commit than, the one this plugin commit pins
 //   restart   — package upgraded but the old process is still serving
 //   locked    — helper copy cleared; a restart brings codes back
 //   signin    — helper up, no Proton account yet
@@ -462,6 +465,16 @@ function setupPhase(view) {
     return "update";
   }
   if (v.binaryReplaced === true) return "restart";
+  // The running helper was built from a different patched tree than this
+  // plugin commit pins, so the plugin's reviewed recipe must be rebuilt. Only
+  // a well-formed reported commit counts; an empty one (older helpers) does not.
+  var fullSha = /^[0-9a-f]{40}$/;
+  var running = String(v.sourceCommit || "");
+  var pinned = String(v.pinnedCommit || "");
+  if (fullSha.test(running) && fullSha.test(pinned) && running !== pinned) return "update";
+  // An earlier AUR build of the helper is installed: switch it to the build
+  // from this plugin's reviewed recipe, which the AUR cannot replace.
+  if (v.probe && v.probe.ok === true && v.probe.aurBuild === true) return "migrate";
   // Proton's own app lock (PIN/password set in Proton's settings), as opposed
   // to this panel's one-way latch above.
   if (v.locked === true) return "applock";
@@ -474,7 +487,7 @@ function setupPhase(view) {
 function primaryAction(phase) {
   switch (phase) {
     case "install": return { id: "install", label: "Install secure helper" };
-    case "migrate": return { id: "install", label: "Switch to the packaged helper" };
+    case "migrate": return { id: "install", label: "Switch to the reviewed helper build" };
     case "update": return { id: "install", label: "Update secure helper" };
     case "start": return { id: "start", label: "Start secure helper" };
     case "restart": return { id: "restart", label: "Restart helper to finish updating" };
@@ -569,13 +582,13 @@ function hintMessage(view) {
   if (phase === "install" && v.probe && v.probe.conflict)
     return "The helper replaces Proton's own Linux app (they share one data folder and cannot run together). Your codes stay on your Proton account.";
   if (phase === "install")
-    return "Codes come from Proton's official Authenticator, built from source with a private local socket. One-time install from the AUR; omarchy update keeps it current.";
+    return "Codes come from Proton's official Authenticator, built once from source with a private local socket. Built from this plugin's own reviewed recipe; plugin updates bring helper updates.";
   if (phase === "migrate")
-    return "A hand-built development helper is running. Switch to the packaged one so omarchy update keeps it current. Your codes and sign-in are kept.";
+    return "Switch the helper to the build from this plugin's reviewed recipe (earlier builds came from the AUR or by hand). Your codes and sign-in are kept.";
   if (phase === "start") return "The helper is installed but not running.";
   if (phase === "starting") return "Waiting for the secure helper to start…";
   if (phase === "update")
-    return "The running helper is older than this panel. Update it; your codes and sign-in are kept.";
+    return "This plugin version comes with a different helper build. Update it; your codes and sign-in are kept.";
   if (phase === "restart")
     return "A new helper version is installed. It switches over by itself when the Proton window is closed, or restart it now.";
   if (v.hidden === true)

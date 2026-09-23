@@ -170,6 +170,11 @@ HELPER_UNIT = "proton-authenticator-omarchy-helper.service"
 # Proton's own Linux app shares the helper's app id, data folder, keyring entry
 # and single-instance D-Bus name, so the two cannot coexist.
 CONFLICTING_BINARIES = (Path("/usr/bin/proton-authenticator"),)
+# pacman's local database entry for the earlier AUR build of the helper
+# (`proton-authenticator-omarchy-helper-<version>`). The build from this
+# plugin's recipe is `proton-authenticator-omarchy-helper@local-<version>`.
+PACMAN_LOCAL_DB = Path("/var/lib/pacman/local")
+AUR_BUILD_PREFIX = "proton-authenticator-omarchy-helper-"
 SYSTEMCTL = "/usr/bin/systemctl"
 
 
@@ -201,6 +206,13 @@ def probe() -> dict:
             unit = value
     except (OSError, subprocess.SubprocessError):
         pass
+    try:
+        aur_build = any(
+            entry.name.startswith(AUR_BUILD_PREFIX) and entry.name[len(AUR_BUILD_PREFIX):][:1].isdigit()
+            for entry in PACMAN_LOCAL_DB.iterdir()
+        )
+    except OSError:
+        aur_build = False
     return {
         "v": 1,
         "ok": True,
@@ -208,6 +220,7 @@ def probe() -> dict:
         "unit": unit,
         "legacy": legacy,
         "conflict": any(path.exists() for path in CONFLICTING_BINARIES),
+        "aurBuild": aur_build,
     }
 
 
