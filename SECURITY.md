@@ -233,20 +233,26 @@ unit file itself.
 commit `0deabe38…`), the SHA-256 of Proton's source tarball for that commit,
 the patch file and its SHA-256, the patched-tree commit, the SHA-256 of every
 file in the helper recipe (`packaging/helper/`), and the official core npm
-package integrity. The installer refuses to build if any recipe file differs
-from its pin. The `PKGBUILD` verifies the tarball, the Node toolchain, the
+package integrity. The source build refuses to start if any recipe file
+differs from its pin. The `PKGBUILD` verifies the tarball, the Node toolchain, the
 patch, the unit, and the window rule by SHA-256 before building;
 `cargo fetch --locked` and Proton's own `yarn.lock` pin every dependency. A
 contract test fails if the panel, the lock file, and the `PKGBUILD` disagree
 on any of these.
 
-The helper is built only from the recipe in the installed plugin checkout,
-never from the AUR or another mutable source, so it cannot change without a
-new plugin commit. Its package name, `proton-authenticator-omarchy-helper@local`,
-contains `@`, which AUR package names cannot, so no AUR package can take its
-place during `omarchy update`. An earlier release installed the helper from the
-AUR under the plain name; the panel detects that build and offers to switch it
-to the reviewed one.
+The installer installs only the package whose SHA-256 is pinned in the
+installed plugin version's lock file. That package is built by GitHub Actions
+from `packaging/helper/` at a `helper-v*` tag, in a clean Arch Linux container,
+and carries a Sigstore-signed build-provenance attestation
+(`gh attestation verify <file> --repo Zeus-Deus/proton-authenticator-omarchy-plugin`)
+naming the workflow, tag, and commit that produced it. A replaced release asset
+fails the checksum, and changing the checksum takes a new plugin commit.
+`setup-helper.sh --from-source` builds the same recipe locally instead. Nothing
+is fetched from the AUR or another mutable source. The package name,
+`proton-authenticator-omarchy-helper@local`, contains `@`, which AUR package
+names cannot, so no AUR package can take its place during `omarchy update`. An
+earlier release installed the helper from the AUR under the plain name; the
+panel detects that build and offers to switch it to the reviewed one.
 
 Open source enables review; it is not by itself proof of safety, and a build
 from source cannot carry Proton's signature. Updates require a diff review of

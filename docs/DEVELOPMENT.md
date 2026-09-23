@@ -18,8 +18,9 @@ real-account check before it ships.
 | The plugin (panel) | this repository | What users install. QML + a small Python socket client. |
 | The helper patch | branch `omarchy-authenticator-helper` in `Zeus-Deus/WebClients` (a fork of `ProtonMail/WebClients`) | Proton's Linux app has no API, so the helper is Proton's own app plus one patch that adds a private local socket. The branch is the reviewable history of that patch. |
 | The helper recipe | `packaging/helper/` | A `PKGBUILD` that builds Proton's pinned release tarball with `omarchy-helper.patch` (exported from the branch above), plus the systemd unit, the Hyprland window rule, and the install hook. |
-| The pins | `helper/proton-helper.lock.json` | Proton version and commit, tarball and patch SHA-256, patched-tree commit, and the SHA-256 of every recipe file. |
-| The installer | `scripts/setup-helper.sh` | Run by the panel's Install/Update button in Omarchy's floating terminal. Checks the recipe against the pins, builds it with `makepkg`, installs it with `pacman -U`. |
+| The pins | `helper/proton-helper.lock.json` | Proton version and commit, tarball and patch SHA-256, patched-tree commit, the SHA-256 of every recipe file, and the URL + SHA-256 of the prebuilt package. |
+| Helper release | `.github/workflows/helper-release.yml` + `.github/scripts/build-helper.sh` | Free GitHub Action. On a `helper-v<version>` tag it builds the recipe once in a clean Arch container and publishes the package as a release asset with a signed build-provenance attestation, so users install in seconds instead of compiling for minutes. |
+| The installer | `scripts/setup-helper.sh` | Run by the panel's Install/Update button in Omarchy's floating terminal. Downloads the pinned release asset, checks its SHA-256, installs it with `pacman -U`. `--from-source` builds the recipe locally instead. |
 | Release watch | `.github/workflows/proton-release-watch.yml` | Free GitHub Action, daily. Opens an issue when Proton publishes a new Linux version. It changes nothing else. |
 | Marketplace listing | issue in `omacom/omarchy-plugin-marketplace` | The listing is bound to one reviewed commit of this repository. |
 
@@ -31,8 +32,9 @@ reviewer saw. Now the helper is built only from the recipe inside the
 installed plugin checkout, and its package name,
 `proton-authenticator-omarchy-helper@local`, contains `@`, which AUR names
 cannot, so no AUR package can replace it. **Do not publish the helper to the
-AUR again**, and do not add any path that fetches a mutable recipe (AUR, a
-branch name, `latest`). The earlier AUR package
+AUR again**, and do not add any path that installs something not pinned by
+this plugin commit (AUR, a branch name, `latest`, an unpinned download). The
+prebuilt package is allowed only because its SHA-256 is in the lock file. The earlier AUR package
 `proton-authenticator-omarchy-helper` is retired; the panel offers to switch
 any machine that still has it.
 
@@ -42,7 +44,7 @@ any machine that still has it.
 |---|---|
 | Only panel files (`*.qml`, `Model.js`, `scripts/helper_client.py`, docs) | Gates, commit, push, then request marketplace verification (below). No helper rebuild. |
 | The helper patch, or Proton released a new version | The full procedure in [Updating the helper](#updating-the-helper). Users then see **Update secure helper** in the panel after they update the plugin. |
-| Only the systemd unit, window rule, or install hook | Bump `pkgrel` in the `PKGBUILD`, update `package.version` and `recipe` in the lock file, build and install locally, then as for panel changes. |
+| Only the systemd unit, window rule, or install hook | Bump `pkgrel` in the `PKGBUILD`, update `package.version` and `recipe` in the lock file, then publish a helper release (steps 6–9 of [Updating the helper](#updating-the-helper)). |
 
 Pushing to `main` does not change the marketplace listing by itself: the
 catalog keeps the approved commit and shows *Update unverified* until a new
@@ -86,7 +88,8 @@ bound to that commit.
 8. The panel never executes the helper binary, a package manager, or sudo.
    Proton's windows open through the socket's `open` op; installs run in
    Omarchy's floating terminal where the user sees them.
-9. The helper is built only from the pinned recipe in this repository. Every
+9. The helper is built only from the pinned recipe in this repository, and the
+   installer accepts only the package whose SHA-256 is in the lock file. Every
    remote input is pinned by full commit or SHA-256, and every recipe file by
    SHA-256 in the lock file.
 10. Test with made-up demo codes. Screenshots for the README or marketplace must
@@ -132,12 +135,20 @@ update:
    (version, commits, hashes, `package.version`, and the `recipe` SHA-256 of
    every file in `packaging/helper/`), and `helperCommit` in `Service.qml`.
    `tests/qml_contract.test.js` fails if any of them disagree.
-6. Run `scripts/setup-helper.sh update` from this checkout: it must verify the
-   recipe, build, pass the `PKGBUILD` `check()`, and install.
-7. Confirm `omarchy-shell proton-authenticator status` reports the new
-   `helperVersion` and `helperSourceCommit`, and that codes still publish and
-   copy.
-8. Commit, push, and request marketplace verification (above).
+6. Optional local check: `scripts/setup-helper.sh update --from-source` must
+   verify the recipe, build, pass the `PKGBUILD` `check()`, and install.
+   The same build in the release container:
+   `docker run --rm -v "$PWD:/src:ro" -v "$PWD/out:/out" -e HOST_UID="$(id -u)" <image from helper-release.yml> bash /src/.github/scripts/build-helper.sh`.
+7. Commit and push, then tag that commit `helper-v<package.version>` and push
+   the tag. The **Helper release** workflow builds it (about half an hour on
+   GitHub's free runners) and publishes the release with an attestation.
+8. Put the release into the lock file: `release.tag`, `release.asset`,
+   `release.url`, and `release.sha256` from the release's `SHA256SUMS`, after
+   `gh attestation verify` on the downloaded asset. Commit.
+9. Run `scripts/setup-helper.sh update` from this checkout, confirm
+   `omarchy-shell proton-authenticator status` reports the new `helperVersion`
+   and `helperSourceCommit`, and that codes still publish and copy.
+10. Push and request marketplace verification (above).
 
 ## Traps
 

@@ -22,7 +22,7 @@
   "package": {
     "name": "proton-authenticator-omarchy-helper@local",
     "version": "1.1.6.omarchy5-1",
-    "builtFrom": "packaging/helper/PKGBUILD by scripts/setup-helper.sh"
+    "builtFrom": "packaging/helper/PKGBUILD, by .github/workflows/helper-release.yml (default install) or scripts/setup-helper.sh --from-source"
   },
   "recipe": {
     "packaging/helper/PKGBUILD": "49942b094f97e3e9598eb1d1359519de6d01e710e046b5fd57e2b40ec44d8557",
@@ -30,5 +30,12 @@
     "packaging/helper/proton-authenticator-omarchy-helper.install": "ea91956a84c32b606029fc11106106c73d51ca135e26f465f569b17e572b1574",
     "packaging/helper/proton-authenticator-omarchy-helper.lua": "53e424d7bf68cc102dd8595e3dea92a1dd51f5a9a46d499ac7cf1df14ba89e92",
     "packaging/helper/proton-authenticator-omarchy-helper.service": "99ab8010bd72b87dc3accda25b08ace2551578f6c16815f4ed61857fa5b07f41"
+  },
+  "release": {
+    "tag": "helper-v1.1.6.omarchy5-1",
+    "asset": "proton-authenticator-omarchy-helper-local-1.1.6.omarchy5-1-x86_64.pkg.tar.zst",
+    "url": "https://github.com/Zeus-Deus/proton-authenticator-omarchy-plugin/releases/download/helper-v1.1.6.omarchy5-1/proton-authenticator-omarchy-helper-local-1.1.6.omarchy5-1-x86_64.pkg.tar.zst",
+    "sha256": "84efa199e3947f13d02ee668c1e6af7a2219c5f15441166646e7754aacd948d3",
+    "commit": "34857088247e3116bf4eaa70288fa6d03bea3d52"
   }
 }

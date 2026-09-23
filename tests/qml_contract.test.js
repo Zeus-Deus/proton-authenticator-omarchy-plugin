@@ -226,6 +226,19 @@ test('the installer builds only the reviewed recipe, pinned file by file', () =>
   for (const sum of sums) assert.match(sum, /^'[0-9a-f]{64}'$/);
   const setup = fs.readFileSync(path.join(root, 'scripts', 'setup-helper.sh'), 'utf8');
   assert.doesNotMatch(setup, /\byay\b|\bparu\b|omarchy-pkg-aur|aur\.archlinux\.org/);
+  // The prebuilt package comes only from this repository's helper release and
+  // is installed only after its SHA-256 matches the pin in the lock file.
+  const release = lock.release;
+  assert.equal(release.tag, `helper-v${lock.package.version}`);
+  assert.equal(release.asset, `proton-authenticator-omarchy-helper-local-${lock.package.version}-x86_64.pkg.tar.zst`);
+  assert.equal(release.url,
+    `https://github.com/Zeus-Deus/proton-authenticator-omarchy-plugin/releases/download/${release.tag}/${release.asset}`);
+  assert.match(release.sha256, /^[0-9a-f]{64}$/);
+  assert.match(setup, /prefix = "https:\/\/github\.com\/Zeus-Deus\/proton-authenticator-omarchy-plugin\/releases\/download\/helper-v"/);
+  const verify = setup.indexOf('sha256sum --check');
+  assert.ok(verify > setup.indexOf('curl --proto'));
+  assert.ok(verify < setup.indexOf('install_package "$pkgfile"'));
+  assert.match(setup, /--proto '=https'/);
   assert.match(setup, /lock\["recipe"\]/);
   assert.match(setup, /makepkg --syncdeps --noconfirm/);
   // sudo is asked once before the long build, not after it (a prompt at the
