@@ -363,6 +363,10 @@ test('setupPhase maps every helper situation to exactly one next step', () => {
   assert.equal(phase(Object.assign({}, up, { api: 0, probe: probe({ unit: 'active' }) })), 'restart');
   assert.equal(phase(Object.assign({}, up, { api: 0, probe: probe({ installed: false }) })), 'update');
   assert.equal(phase(Object.assign({}, up, { api: 0, probe: { ok: false } })), 'update');
+  // The header agrees with the button for an old helper.
+  assert.equal(M.statusMessage(Object.assign({ checked: true }, up, { api: 0, probe: probe({ legacy: true }) })), 'Development helper running');
+  assert.equal(M.statusMessage(Object.assign({ checked: true }, up, { api: 0, probe: probe({ unit: 'active' }) })), 'Update installed · restart pending');
+  assert.equal(M.statusMessage(Object.assign({ checked: true }, up, { api: 0, probe: probe({ installed: false }) })), 'Secure helper needs an update');
   assert.equal(phase(Object.assign({}, up, { binaryReplaced: true })), 'restart');
   assert.equal(phase(Object.assign({}, up, { latched: true, locked: true, state: 'locked' })), 'locked');
   // The latch outranks an outdated helper: its recovery (restart) comes first.

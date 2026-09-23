@@ -467,7 +467,12 @@ function statusMessage(view) {
     return publicError(v.error) || "Secure helper unavailable";
   }
   if (v.latched === true) return "Helper copy cleared";
-  if (Math.floor(Number(v.api) || 0) < REQUIRED_HELPER_API) return "Secure helper needs an update";
+  if (Math.floor(Number(v.api) || 0) < REQUIRED_HELPER_API) {
+    var old = setupPhase(v);
+    if (old === "migrate") return "Development helper running";
+    if (old === "restart") return "Update installed · restart pending";
+    return "Secure helper needs an update";
+  }
   if (v.binaryReplaced === true) return "Update installed · restart pending";
   if (v.paused === true) return "Codes paused · waiting for the helper";
   if (v.state === "needs_login") return "Sign in to enable encrypted sync";
