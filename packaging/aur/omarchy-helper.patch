@@ -933,7 +933,7 @@ index c08010da68..a028e1c978 100644
  
 diff --git a/applications/authenticator/src-tauri/src/helper.rs b/applications/authenticator/src-tauri/src/helper.rs
 new file mode 100644
-index 0000000000..b7dc463b32
+index 0000000000..8013654aa6
 --- /dev/null
 +++ b/applications/authenticator/src-tauri/src/helper.rs
 @@ -0,0 +1,1479 @@
@@ -960,7 +960,7 @@ index 0000000000..b7dc463b32
 +const HELPER_API: u8 = 2;
 +// Revision of the Omarchy patch on top of Proton's release. Bumped whenever the
 +// patch changes, independently of Proton's own version.
-+const HELPER_PATCH_REVISION: u32 = 3;
++const HELPER_PATCH_REVISION: u32 = 4;
 +const MAX_REQUEST_BYTES: u64 = 16 * 1024;
 +const MAX_ENTRIES: usize = 200;
 +const MAX_RESPONSE_BYTES: usize = 1024 * 1024;
@@ -2417,7 +2417,7 @@ index 0000000000..b7dc463b32
 +    }
 +}
 diff --git a/applications/authenticator/src-tauri/src/lib.rs b/applications/authenticator/src-tauri/src/lib.rs
-index 1525a1ba2c..34192522ed 100644
+index 1525a1ba2c..84d650b641 100644
 --- a/applications/authenticator/src-tauri/src/lib.rs
 +++ b/applications/authenticator/src-tauri/src/lib.rs
 @@ -1,14 +1,16 @@
@@ -2439,10 +2439,26 @@ index 1525a1ba2c..34192522ed 100644
  mod storage_key;
  mod store;
  
-@@ -28,11 +30,251 @@ fn apply_webkitgtk_workaround() {
+@@ -28,11 +30,267 @@ fn apply_webkitgtk_workaround() {
      }
  }
  
++/// Proton's window-state plugin saves and restores each window's size,
++/// position and title bar. Under Hyprland (Omarchy) the compositor owns all of
++/// that: a restored `decorated: true` would put back the GTK title bar the
++/// helper removes, and restored geometry fights the float/center rule. So the
++/// plugin skips Proton's windows there; every other desktop keeps it as is.
++fn window_state_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
++    let builder = tauri_plugin_window_state::Builder::new();
++    #[cfg(target_os = "linux")]
++    let builder = if helper::use_compositor_decorations() {
++        builder.with_denylist(&["main", "login"])
++    } else {
++        builder
++    };
++    builder.build()
++}
++
 +/// Surfaces Proton's own window for the Omarchy panel (socket `open` op) and
 +/// for forwarded single-instance launches. Login does not show the main window:
 +/// it sets the one-shot request and emits the event the web bridge answers by
@@ -2691,7 +2707,7 @@ index 1525a1ba2c..34192522ed 100644
      let builder = Builder::<tauri::Wry>::new()
          .commands(collect_commands![
              auth::log_in,
-@@ -54,10 +296,18 @@ pub fn run() {
+@@ -54,10 +312,18 @@ pub fn run() {
          )
          .expect("Failed to export typescript bindings");
  
@@ -2712,7 +2728,7 @@ index 1525a1ba2c..34192522ed 100644
              let mut win_builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
                  .title("Proton Authenticator")
                  .user_agent(&auth::get_user_agent(version))
-@@ -65,18 +315,58 @@ pub fn run() {
+@@ -65,18 +331,58 @@ pub fn run() {
                  .inner_size(800.0, 600.0)
                  .min_inner_size(420.0, 480.0);
  
@@ -2773,16 +2789,18 @@ index 1525a1ba2c..34192522ed 100644
                  .target(tauri_plugin_log::Target::new(
                      tauri_plugin_log::TargetKind::Stdout,
                  ))
-@@ -88,18 +378,59 @@ pub fn run() {
+@@ -87,19 +393,60 @@ pub fn run() {
+                 ))
                  .build(),
          )
-         .plugin(tauri_plugin_window_state::Builder::new().build())
+-        .plugin(tauri_plugin_window_state::Builder::new().build())
 -        .plugin(tauri_plugin_process::init())
 -        .plugin(tauri_plugin_updater::Builder::new().build())
 -        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
 -            let _ = app
 -                .get_webview_window("main")
 -                .and_then(|window| window.set_focus().ok());
++        .plugin(window_state_plugin())
 +        .plugin(tauri_plugin_process::init());
 +
 +    // Fork-local divergence: the Linux build is maintained locally and must

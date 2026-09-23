@@ -9,7 +9,7 @@
 
 pkgname=proton-authenticator-omarchy-helper
 _protonver=1.1.6
-_patchrev=3
+_patchrev=4
 pkgver=${_protonver}.omarchy${_patchrev}
 pkgrel=1
 pkgdesc='Proton Authenticator (official source + local socket) as a background helper for the Omarchy panel plugin'
@@ -37,7 +37,7 @@ options=(!lto !debug)
 _protoncommit=0deabe38e304f5d42d6a72783c64c1884c17fce3
 # Commit of the patched tree in the reviewable fork; embedded in the binary and
 # reported by the helper so anyone can check what is running.
-_patchcommit=64bdf0686e5bae7177dfa549940260a39b38b62d
+_patchcommit=a235015f866ccaedae508f8e77264e79f93ca877
 # Proton's workspace requires Node ">= 22.14.0 <23.6.0". Arch's Node 22 package
 # (nodejs-lts-jod) conflicts with the system nodejs, which would make a one-press
 # install fail, so the build uses the official Node 22 release tarball instead.
@@ -50,7 +50,7 @@ source=("WebClients-${_protoncommit}.tar.gz::https://github.com/ProtonMail/WebCl
         proton-authenticator-omarchy-helper.lua)
 sha256sums=('80848edca68c31d97fde946748a0b6c21ed851de80b57f26d8534b4b493ac323'
             'd60acfe00a2932254bb0ad20e01b0d74397a0875595de719654b214f4b03f307'
-            'bd6ce63f8c660bcfbe39132fe488ea5c066eeaf9a4362ac35491aa3cc180d7d2'
+            '45bfd63729cda569d09b3b082016abf4153e570f10a69d324079eefd11abd582'
             '99ab8010bd72b87dc3accda25b08ace2551578f6c16815f4ed61857fa5b07f41'
             '53e424d7bf68cc102dd8595e3dea92a1dd51f5a9a46d499ac7cf1df14ba89e92')
 
