@@ -1,6 +1,7 @@
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import qs.Commons
 import "Model.js" as Model
 
 // Panel-facing client for the pinned Proton helper. The helper owns Proton
@@ -14,7 +15,8 @@ Item {
 
   property bool checked: false
   property bool available: false
-  property string state: "unavailable"
+  // Named helperState: `state` is an existing Item property.
+  property string helperState: "unavailable"
   property bool locked: false
   // The helper expired its own snapshot: `ready` degraded to `unavailable` with
   // no rows and `stale: true`. Transient, and distinct from an absent helper.
@@ -40,6 +42,20 @@ Item {
   // Source commit the running helper reports; surfaced through the `status`
   // IPC verb so a review can check what is actually serving codes.
   property string helperSourceCommit: ""
+  property string helperVersion: ""
+  property int helperApi: 0
+  // The one-way helper lock (panel `x`), as opposed to Proton's own app lock.
+  property bool latched: false
+  // The package manager replaced the helper binary; the old process still runs.
+  property bool binaryReplaced: false
+  // Local setup facts from `helper_client.py probe`; read only while the
+  // helper socket is unavailable.
+  property var probe: ({ ok: false })
+  readonly property string phase: Model.setupPhase({
+    hidden: hidden, available: available, probe: probe, latched: latched,
+    locked: locked, api: helperApi, binaryReplaced: binaryReplaced,
+    paused: paused, state: helperState, synced: synced
+  })
   property int now: 0
   property int entryCount: 0
   property var entries: []
@@ -55,9 +71,15 @@ Item {
   // file read every snapshot and forge helper responses.
   readonly property string pythonBinary: "/usr/bin/python3"
   readonly property string browserLauncher: "/usr/share/omarchy/bin/omarchy-launch-browser"
-  readonly property string helperBinary: homeDir + "/.local/bin/proton-authenticator-omarchy-helper"
-  readonly property string helperCommit: "ce465e3717a54a3639b57d96a935ea5a3f658eed"
-  readonly property bool busy: snapshotProcess.running || copyProcess.running || lockProcess.running
+  readonly property string terminalLauncher: "/usr/share/omarchy/bin/omarchy-launch-floating-terminal-with-presentation"
+  readonly property string setupScript: pluginDir + "/scripts/setup-helper.sh"
+  readonly property string systemctl: "/usr/bin/systemctl"
+  readonly property string helperUnit: Model.HELPER_UNIT
+  readonly property string helperCommit: "8254c6175512ab7e35bb3c2ac73395b49d3cefde"
+  readonly property string sourceUrl:
+    "https://github.com/Zeus-Deus/proton-authenticator-omarchy-plugin#why-a-patched-helper"
+  readonly property bool busy: snapshotProcess.running || copyProcess.running
+    || lockProcess.running || unitProcess.running
 
   signal statusUpdated()
 
@@ -122,18 +144,51 @@ Item {
     lockProcess.running = true
   }
 
-  function launchLogin() {
-    // Fixed helper executable and fixed mode. Credentials are entered only in
-    // the helper's Proton UI and never cross argv, QML properties, or shell IPC.
-    Quickshell.execDetached([helperBinary, "--background", "--login"])
-    setActionStatus("Opening secure Proton sign-in")
+  // Asks the running helper to surface one of Proton's own windows: `login`
+  // (Device sync sign-in), `manage` (the full app: edit, delete, reorder,
+  // import, export, settings, sign out) or `add` (Proton's add-code dialog).
+  // Going through the socket reaches the hardened systemd service; the panel
+  // never starts a helper process of its own. Credentials are typed only into
+  // Proton's window and never cross argv, QML properties, or shell IPC.
+  function openView(view) {
+    if (["login", "manage", "add"].indexOf(view) === -1 || openProcess.running) return
+    openProcess.command = [pythonBinary, clientPath, "open", view]
+    openProcess.running = true
+    setActionStatus(view === "login" ? "Opening Proton sign-in" : "Opening Proton Authenticator")
+  }
+
+  // Install, update, or switch to the packaged helper in Omarchy's floating
+  // terminal, where the user sees every step and types sudo themselves.
+  function runSetup(mode) {
+    var arg = mode === "update" ? "update" : "install"
+    Quickshell.execDetached([terminalLauncher, Util.shellQuote(setupScript) + " " + arg])
+    setActionStatus("Opened the installer")
+  }
+
+  function startHelper() {
+    if (unitProcess.running) return
+    unitProcess.command = [systemctl, "--user", "enable", "--now", helperUnit]
+    unitProcess.running = true
+    setActionStatus("Starting secure helper")
+  }
+
+  // Restarting is the only way out of the one-way lock and how an upgraded
+  // binary takes over; Proton's own session and codes persist on disk.
+  function restartHelper() {
+    if (unitProcess.running) return
+    unitProcess.command = [systemctl, "--user", "restart", helperUnit]
+    unitProcess.running = true
+    setActionStatus("Restarting secure helper")
+  }
+
+  function runProbe() {
+    if (probeProcess.running) return
+    probeProcess.command = [pythonBinary, clientPath, "probe"]
+    probeProcess.running = true
   }
 
   function openHelperSource() {
-    Quickshell.execDetached([
-      browserLauncher,
-      "https://github.com/Zeus-Deus/WebClients/commit/" + helperCommit
-    ])
+    Quickshell.execDetached([browserLauncher, sourceUrl])
   }
 
   function applySnapshot(raw) {
@@ -142,8 +197,17 @@ Item {
     if (next.ok && !Model.acceptsSnapshot(helperInstance, generation, next.instance, next.generation)) return
     checked = true
     available = next.ok
-    state = next.state
+    helperState = next.state
     locked = next.locked
+    latched = next.ok && next.latched
+    binaryReplaced = next.ok && next.binaryReplaced
+    if (next.ok) {
+      helperApi = next.api
+      helperVersion = next.helperVersion
+    }
+    // Local install facts decide the fix whenever the helper is missing or
+    // too old to report them itself.
+    if (!next.ok || next.api < Model.REQUIRED_HELPER_API) runProbe()
     paused = Model.isPaused(next)
     synced = next.synced
     account = next.account
@@ -215,8 +279,9 @@ Item {
         root.helperInstance = latch.instance
         root.latchFloor = latch.floor
         root.generation = root.latchFloor
-        root.state = "locked"
+        root.helperState = "locked"
         root.locked = true
+        root.latched = true
         root.paused = false
         root.entryCount = 0
         root.entries = []
@@ -224,6 +289,41 @@ Item {
       } else {
         root.error = "Helper rejected the hide request"
       }
+      root.refresh()
+    }
+  }
+
+  Process {
+    id: probeProcess
+    running: false
+    command: []
+    stdout: StdioCollector { id: probeOut; waitForEnd: true }
+    stderr: StdioCollector { waitForEnd: true }
+    onExited: function(exitCode) {
+      root.probe = exitCode === 0 ? Model.parseProbe(String(probeOut.text || "")) : Model.parseProbe("")
+      root.statusUpdated()
+    }
+  }
+
+  Process {
+    id: openProcess
+    running: false
+    command: []
+    stdout: StdioCollector { id: openOut; waitForEnd: true }
+    stderr: StdioCollector { waitForEnd: true }
+    onExited: function(exitCode) {
+      if (exitCode !== 0) root.setActionStatus("Could not open Proton Authenticator")
+    }
+  }
+
+  Process {
+    id: unitProcess
+    running: false
+    command: []
+    stdout: StdioCollector { waitForEnd: true }
+    stderr: StdioCollector { waitForEnd: true }
+    onExited: function(exitCode) {
+      if (exitCode !== 0) root.setActionStatus("systemd could not start the helper")
       root.refresh()
     }
   }

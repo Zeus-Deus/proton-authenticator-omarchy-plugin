@@ -1,46 +1,39 @@
-# Pinned helper boundary
+# Helper pin
 
-The production helper is developed in the pinned fork:
+The panel's codes come from the helper: Proton's official Authenticator source
+for one release, with one patch that adds a private local socket. It is
+distributed as the AUR package `proton-authenticator-omarchy-helper`; the
+package files live in [`../packaging/aur/`](../packaging/aur/).
 
-- upstream: `ProtonMail/WebClients`
-- fork: `Zeus-Deus/WebClients`
-- exact commit and official core package integrity: `proton-helper.lock.json`
+[`proton-helper.lock.json`](proton-helper.lock.json) pins:
 
-It remains GPL-3 and owns Proton login, encrypted sync, entry decryption, code
-generation, locking, and clipboard writes. The MIT QML plugin is only a bounded
-client of its user-owned Unix socket.
+- `protonVersion` / `releaseBranch` / `baseCommit`: the Proton release the
+  helper is built from, and `baseTarballSha256` for Proton's source tarball of
+  that commit;
+- `helperCommit`: the patched tree in `Zeus-Deus/WebClients` (branch
+  `omarchy-authenticator-helper`), embedded in the binary and reported as
+  `sourceCommit` over the socket;
+- `patch` / `patchSha256`: the patch the package applies;
+- `helperApi`: the socket feature level this panel expects;
+- `authenticatorRustCore`: the official core package the **test fixture** uses.
 
-The production helper runs as a hidden user service using
-`proton-authenticator-omarchy-helper.service`; `--background --login` temporarily
-shows Proton's own Device sync UI for sign-in. Panel hide/show uses only the
-private socket and never opens Proton's window.
-
-## Development provisioning
-
-Until a reviewed helper release artifact is published, install a locally built
-binary explicitly:
+The panel installs, starts, and restarts the helper itself (see the README). By
+hand:
 
 ```bash
-mise exec node@24.18.0 -- corepack yarn workspace proton-authenticator build:omarchy-helper
-install -Dm755 /path/to/WebClients/applications/authenticator/src-tauri/target/release/proton-authenticator \
-  ~/.local/opt/proton-authenticator-omarchy-helper/proton-authenticator
-ln -sfn ~/.local/opt/proton-authenticator-omarchy-helper/proton-authenticator \
-  ~/.local/bin/proton-authenticator-omarchy-helper
-install -Dm644 helper/proton-authenticator-omarchy-helper.service \
-  ~/.config/systemd/user/proton-authenticator-omarchy-helper.service
-systemctl --user daemon-reload
+omarchy pkg aur add proton-authenticator-omarchy-helper
 systemctl --user enable --now proton-authenticator-omarchy-helper.service
 ```
 
-The launcher and unit intentionally resolve to the same installed binary.
+## Test fixture
 
-`tests/fixtures/fixture-server.mjs` is test-only and lives under `tests/`, never
-under `helper/`. It uses Proton's official published
-`@protontech/authenticator-rust-core` package and the public RFC 6238 test secret
-to prove current/next code rendering without a Proton account. It refuses to
-start without `--fixture`, without `PROTON_AUTH_FIXTURE=1`, under
-`NODE_ENV=production`, or from a path inside `~/.config/omarchy/plugins/`. It
-must never be installed or launched by the plugin.
+`tests/fixtures/fixture-server.mjs` is test-only and lives under `tests/`. It
+uses Proton's official published `@protontech/authenticator-rust-core` package
+and the public RFC 6238 test secret to prove current/next code rendering without
+a Proton account. It refuses to start without `--fixture`, without
+`PROTON_AUTH_FIXTURE=1`, under `NODE_ENV=production`, or from a path inside
+`~/.config/omarchy/plugins/`. It must never be installed or launched by the
+plugin.
 
 `omarchy plugin add` clones the whole repository, so an installed checkout must
 exclude the development tree explicitly. `.gitattributes` marks `/tests` as
@@ -50,19 +43,5 @@ with sparse-checkout:
 ```bash
 plugin_dir=~/.config/omarchy/plugins/io.github.zeus-deus.proton-authenticator
 git -C "$plugin_dir" sparse-checkout set --no-cone '/*' '!/tests'
+test ! -e "$plugin_dir/tests"
 ```
-
-Verify no fixture reached production:
-
-```bash
-test ! -e "$plugin_dir/tests" && test ! -e "$plugin_dir/helper/fixture-server.mjs"
-```
-
-Install the pinned test dependency and run the integration test:
-
-```bash
-npm ci --prefix tests/fixtures --ignore-scripts --no-audit --no-fund
-node --test tests/helper.integration.test.js
-```
-
-The fixture runtime directory is mode `0700`; its Unix socket is `0600`.

@@ -42,6 +42,10 @@ test('parseHelperSnapshot accepts bounded official-core code rows', () => {
     generation: 7,
     instance: '',
     sourceCommit: '',
+    api: 0,
+    helperVersion: '',
+    latched: false,
+    binaryReplaced: false,
     now: 59,
     entries: [{
       id: 'fixture-rfc6238',
@@ -193,11 +197,11 @@ test('parseCopyResponse distinguishes a stale refusal from a real failure', () =
 });
 
 test('panel wording separates panel-local hiding from a cleared helper copy', () => {
-  const base = { checked: true, available: true, state: 'ready', entryCount: 2 };
+  const base = { checked: true, available: true, state: 'ready', entryCount: 2, api: M.REQUIRED_HELPER_API };
   assert.equal(M.statusMessage(Object.assign({}, base, { synced: true })), '2 codes · synced');
   assert.equal(M.statusMessage(Object.assign({}, base, { entryCount: 1 })), '1 code · local');
   assert.equal(M.statusMessage({ checked: false }), 'Connecting to secure helper…');
-  assert.equal(M.statusMessage({ checked: true, available: false }), 'Secure helper unavailable');
+  assert.equal(M.statusMessage({ checked: true, available: false, probe: { ok: true, installed: true, unit: 'active' } }), 'Secure helper unavailable');
 
   // Hiding is local: it must not claim the helper dropped anything.
   const hidden = M.statusMessage(Object.assign({}, base, { hidden: true }));
@@ -208,13 +212,17 @@ test('panel wording separates panel-local hiding from a cleared helper copy', ()
   // Paused reads as transient, and never as an unavailable helper.
   assert.equal(M.statusMessage(Object.assign({}, base, { state: 'unavailable', paused: true })),
     'Codes paused · waiting for the helper');
-  assert.match(M.hintMessage({ paused: true }), /publishes again/);
+  assert.match(M.hintMessage(Object.assign({}, base, { state: 'unavailable', paused: true })), /publishes again/);
 
-  // The helper-side lock is the one that really cleared the codes.
-  assert.equal(M.statusMessage(Object.assign({}, base, { state: 'locked', locked: true })),
+  // The helper-side latch is the one that really cleared the codes; Proton's
+  // own app lock (PIN/password) is a different state with a different fix.
+  assert.equal(M.statusMessage(Object.assign({}, base, { state: 'locked', locked: true, latched: true })),
     'Helper copy cleared');
-  assert.match(M.hintMessage({ locked: true }), /cleared its copy/);
-  assert.match(M.hintMessage({ state: 'needs_login' }), /Sign in through the pinned Proton helper/);
+  assert.match(M.hintMessage(Object.assign({}, base, { latched: true })), /cleared its copy/);
+  assert.equal(M.statusMessage(Object.assign({}, base, { state: 'locked', locked: true })),
+    "Locked by Proton's app lock");
+  assert.match(M.hintMessage(Object.assign({}, base, { locked: true })), /Unlock it in Proton's window/);
+  assert.match(M.hintMessage(Object.assign({}, base, { state: 'needs_login' })), /Sign in once in Proton's own window/);
 
   // Hidden outranks every other state: a hidden panel shows nothing else.
   assert.equal(M.statusMessage({ checked: true, hidden: true, available: false, paused: true }),
@@ -225,10 +233,10 @@ test('panel wording separates panel-local hiding from a cleared helper copy', ()
   assert.equal(M.statusMessage({ checked: true, available: false, error: 'maximum recursion depth exceeded while decoding a JSON array' }), 'Secure helper unavailable');
   assert.equal(M.statusMessage({ checked: true, available: false, error: 'helper socket has a foreign owner' }), 'Secure helper socket failed its safety check');
   assert.equal(M.statusMessage({ checked: true, available: false, error: 'helper response timeout' }), 'Secure helper did not respond');
-  // The locked hint names the exact recovery command.
-  assert.match(M.hintMessage({ locked: true }), /systemctl --user restart proton-authenticator-omarchy-helper/);
-  assert.match(M.LOCK_CONFIRM_MESSAGE, /cannot be undone/);
-  assert.match(M.LOCK_CONFIRM_MESSAGE, /systemctl --user restart proton-authenticator-omarchy-helper/);
+  // Recovery is a panel button now, not a command the user has to type.
+  assert.match(M.hintMessage(Object.assign({}, base, { latched: true })), /Restarting it brings them back/);
+  assert.match(M.LOCK_CONFIRM_MESSAGE, /restart the helper from this panel/);
+  assert.equal(M.primaryAction(M.setupPhase(Object.assign({}, base, { latched: true }))).id, 'restart');
 });
 
 test('the latch floor resets only when the helper reports a different instance', () => {
@@ -327,4 +335,92 @@ test('sanitizeText strips the remaining invisible and filler code points', () =>
   }
   // Legitimate text is untouched.
   assert.equal(M.sanitizeText('Zürich Bank · Konto'), 'Zürich Bank · Konto');
+});
+
+test('setupPhase maps every helper situation to exactly one next step', () => {
+  const api = M.REQUIRED_HELPER_API;
+  const probe = (p) => Object.assign({ ok: true, installed: true, unit: 'inactive', legacy: false, conflict: false }, p);
+  const phase = (v) => M.setupPhase(v);
+  // Socket down: the local probe decides.
+  assert.equal(phase({ available: false, probe: probe({ installed: false }) }), 'install');
+  assert.equal(phase({ available: false, probe: probe({ installed: false, conflict: true }) }), 'install');
+  assert.equal(phase({ available: false, probe: probe({ conflict: true }) }), 'install');
+  assert.equal(phase({ available: false, probe: probe({ installed: false, legacy: true }) }), 'migrate');
+  // A leftover development unit in ~/.config shadows the packaged one.
+  assert.equal(phase({ available: false, probe: probe({ legacy: true }) }), 'migrate');
+  assert.equal(phase({ available: false, probe: probe({ unit: 'inactive' }) }), 'start');
+  assert.equal(phase({ available: false, probe: probe({ unit: 'failed' }) }), 'start');
+  assert.equal(phase({ available: false, probe: probe({ unit: 'active' }) }), 'starting');
+  assert.equal(phase({ available: false, probe: { ok: false } }), 'starting');
+  assert.equal(phase({ available: false }), 'starting');
+  // Socket up.
+  const up = { available: true, api, state: 'ready' };
+  assert.equal(phase(up), 'ready');
+  assert.equal(phase(Object.assign({}, up, { api: 1 })), 'update');
+  assert.equal(phase(Object.assign({}, up, { api: undefined })), 'update');
+  // An old helper answering: the files on disk decide the fix.
+  assert.equal(phase(Object.assign({}, up, { api: 0, probe: probe({ legacy: true }) })), 'migrate');
+  assert.equal(phase(Object.assign({}, up, { api: 0, probe: probe({ unit: 'active' }) })), 'restart');
+  assert.equal(phase(Object.assign({}, up, { api: 0, probe: probe({ installed: false }) })), 'update');
+  assert.equal(phase(Object.assign({}, up, { api: 0, probe: { ok: false } })), 'update');
+  assert.equal(phase(Object.assign({}, up, { binaryReplaced: true })), 'restart');
+  assert.equal(phase(Object.assign({}, up, { latched: true, locked: true, state: 'locked' })), 'locked');
+  // The latch outranks an outdated helper: its recovery (restart) comes first.
+  assert.equal(phase(Object.assign({}, up, { latched: true, api: 1 })), 'locked');
+  assert.equal(phase(Object.assign({}, up, { locked: true, state: 'locked' })), 'applock');
+  assert.equal(phase(Object.assign({}, up, { state: 'needs_login' })), 'signin');
+  assert.equal(phase(Object.assign({}, up, { paused: true, state: 'unavailable' })), 'paused');
+  assert.equal(phase(Object.assign({}, up, { hidden: true })), 'hidden');
+  assert.equal(phase({ hidden: true, available: false }), 'hidden');
+
+  const actions = {
+    install: 'install', migrate: 'install', update: 'install', start: 'start', restart: 'restart',
+    locked: 'restart', applock: 'manage', signin: 'login', paused: 'refresh', hidden: 'show',
+    starting: 'refresh', ready: ''
+  };
+  for (const [p, id] of Object.entries(actions)) {
+    const action = M.primaryAction(p);
+    assert.equal(action.id, id, p);
+    assert.equal(action.label === '', id === '', p);
+  }
+});
+
+test('parseProbe accepts only the fixed probe shape', () => {
+  assert.deepEqual(M.parseProbe('{"v":1,"ok":true,"installed":true,"unit":"active","legacy":false,"conflict":false}'),
+    { ok: true, installed: true, unit: 'active', legacy: false, conflict: false });
+  // Unknown unit states and non-boolean flags collapse to safe values.
+  assert.deepEqual(M.parseProbe('{"v":1,"ok":true,"installed":"yes","unit":"rm -rf","legacy":1,"conflict":null}'),
+    { ok: true, installed: false, unit: 'unknown', legacy: false, conflict: false });
+  for (const bad of ['', 'nope', '{"v":2,"ok":true}', '{"v":1,"ok":false}', '[]'])
+    assert.equal(M.parseProbe(bad).ok, false, bad);
+});
+
+test('a forged out-of-range generation rejects the whole response instead of clamping', () => {
+  const row = { id: 'a', name: 'n', issuer: 'i', type: 'Totp', code: '123456', nextCode: '654321', period: 30, validUntil: 30 };
+  const base = { v: 1, ok: true, state: 'ready', now: 1, instance: 'ab', entries: [row] };
+  // (JSON cannot carry Infinity; it arrives as null, i.e. no generation.)
+  for (const generation of [M.MAX_GENERATION + 1, 2 ** 53, -1, 'NaN', '1e400']) {
+    const parsed = M.parseHelperSnapshot(JSON.stringify(Object.assign({}, base, { generation })));
+    assert.equal(parsed.ok, false, String(generation));
+    assert.deepEqual(parsed.entries, []);
+    assert.equal(M.parseLockResponse(JSON.stringify({ v: 1, ok: true, locked: true, generation, instance: 'ab' })).ok, false);
+  }
+  assert.equal(M.parseHelperSnapshot(JSON.stringify(Object.assign({}, base, { generation: M.MAX_GENERATION }))).ok, true);
+});
+
+test('helper version and api fields are validated before display', () => {
+  const base = { v: 1, ok: true, state: 'ready', now: 1, generation: 1, entries: [] };
+  const good = M.parseHelperSnapshot(JSON.stringify(Object.assign({}, base, {
+    api: 2, helperVersion: '1.1.6+omarchy.1', latched: false, binaryReplaced: true
+  })));
+  assert.equal(good.api, 2);
+  assert.equal(good.helperVersion, '1.1.6+omarchy.1');
+  assert.equal(good.binaryReplaced, true);
+  const bad = M.parseHelperSnapshot(JSON.stringify(Object.assign({}, base, {
+    api: '9999', helperVersion: '1.1.6\u202Eevil', latched: 'true', binaryReplaced: 1
+  })));
+  assert.equal(bad.api, 255);
+  assert.equal(bad.helperVersion, '');
+  assert.equal(bad.latched, false);
+  assert.equal(bad.binaryReplaced, false);
 });

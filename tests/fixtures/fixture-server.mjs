@@ -64,6 +64,18 @@ function response(id, body) {
   return JSON.stringify({ v: 1, id, ...body }) + '\n';
 }
 
+// Mirrors the helper's API level fields. A test may impersonate an older
+// helper (api 1, no fields) or one whose binary a package upgrade replaced.
+const helperApi = process.env.PROTON_AUTH_FIXTURE_API === '1' ? 1 : 2;
+const binaryReplaced = process.env.PROTON_AUTH_FIXTURE_REPLACED === '1';
+const VIEWS = new Set(['manage', 'login', 'add']);
+const opened = [];
+
+function apiFields() {
+  if (helperApi < 2) return {};
+  return { api: helperApi, helperVersion: '1.1.6+omarchy.1', latched: isLocked, binaryReplaced };
+}
+
 function snapshot(id) {
   if (isLocked) {
     return response(id, {
@@ -75,6 +87,7 @@ function snapshot(id) {
       account: 'RFC fixture',
       generation,
       instance,
+      ...apiFields(),
       now: Number(fixedTime),
       coreVersion: library_version(),
       entries: [],
@@ -92,6 +105,7 @@ function snapshot(id) {
       synced: false,
       account: 'RFC fixture',
       generation,
+      ...apiFields(),
       now,
       entries: [],
     });
@@ -119,6 +133,7 @@ function snapshot(id) {
     account: 'RFC fixture',
     generation,
     instance,
+    ...apiFields(),
     now,
     coreVersion: library_version(),
     entries,
@@ -136,6 +151,14 @@ function handle(request) {
     if (isLocked) return response(id, { ok: false, error: 'locked', generation });
     if (!fixtureEntries.some((entry) => request.itemId === entry.id)) return response(id, { ok: false, error: 'not_found' });
     return response(id, { ok: true, copied: true, generation });
+  }
+  if (request.op === 'open' && helperApi >= 2) {
+    // Opening a window never touches codes or the latch. The fixture records
+    // the view so a test can prove exactly what the client asked for.
+    if (!VIEWS.has(request.view)) return response(id, { ok: false, error: 'invalid_view' });
+    if (request.itemId !== undefined) return response(id, { ok: false, error: 'invalid_request' });
+    opened.push(request.view);
+    return response(id, { ok: true, opened: true, views: opened.slice() });
   }
   if (request.op === 'lock') {
     isLocked = true;

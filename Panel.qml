@@ -27,8 +27,14 @@ Panel {
   readonly property color dim: Qt.darker(foreground, 1.55)
   readonly property color hoverFill: Style.hoverFillFor(foreground, Color.accent)
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
-  readonly property bool ready: authenticator.available && authenticator.state === "ready"
-    && !authenticator.locked && !authenticator.hidden && !authenticator.paused
+  readonly property bool ready: authenticator.available && authenticator.helperState === "ready"
+    && !authenticator.locked && !authenticator.latched && !authenticator.hidden && !authenticator.paused
+  // An outdated or just-upgraded helper can still serve codes; the panel shows
+  // them and offers the update/restart as a notice instead of hiding them.
+  readonly property bool maintenanceNotice: root.ready
+    && (authenticator.phase === "update" || authenticator.phase === "restart"
+        || authenticator.phase === "migrate")
+  readonly property var primary: Model.primaryAction(authenticator.phase)
 
   function heroMeta() {
     return Model.statusMessage({
@@ -36,12 +42,54 @@ Panel {
       available: authenticator.available,
       hidden: authenticator.hidden,
       paused: authenticator.paused,
-      state: authenticator.state,
+      state: authenticator.helperState,
       locked: authenticator.locked,
+      latched: authenticator.latched,
+      api: authenticator.helperApi,
+      binaryReplaced: authenticator.binaryReplaced,
+      probe: authenticator.probe,
       synced: authenticator.synced,
       entryCount: authenticator.entryCount,
       error: authenticator.error
     })
+  }
+
+  function hint() {
+    return Model.hintMessage({
+      hidden: authenticator.hidden,
+      paused: authenticator.paused,
+      available: authenticator.available,
+      probe: authenticator.probe,
+      state: authenticator.helperState,
+      locked: authenticator.locked,
+      latched: authenticator.latched,
+      api: authenticator.helperApi,
+      binaryReplaced: authenticator.binaryReplaced,
+      synced: authenticator.synced
+    })
+  }
+
+  // Proton's window and Omarchy's floating terminal open underneath this
+  // full-screen panel layer, so the panel closes before either is shown.
+  function openProton(view) {
+    root.close()
+    authenticator.openView(view)
+  }
+
+  function runAction(id) {
+    switch (id) {
+    case "install":
+      root.close()
+      authenticator.runSetup(authenticator.phase === "update" ? "update" : "install")
+      break
+    case "start": authenticator.startHelper(); break
+    case "restart": authenticator.restartHelper(); break
+    case "login": root.openProton("login"); break
+    case "manage": root.openProton("manage"); break
+    case "add": root.openProton("add"); break
+    case "show": authenticator.showCodes(); break
+    case "refresh": authenticator.refresh(); break
+    }
   }
 
   function selectedEntry() {
@@ -138,13 +186,16 @@ Panel {
       return JSON.stringify({
         checked: authenticator.checked,
         available: authenticator.available,
-        state: authenticator.state,
+        state: authenticator.helperState,
+        phase: authenticator.phase,
         locked: authenticator.locked,
+        latched: authenticator.latched,
         hidden: authenticator.hidden,
         paused: authenticator.paused,
         synced: authenticator.synced,
         count: authenticator.entryCount,
         helperSourceCommit: authenticator.helperSourceCommit,
+        helperVersion: authenticator.helperVersion,
         pinnedHelperCommit: authenticator.helperCommit,
         error: authenticator.error
       })
@@ -185,9 +236,7 @@ Panel {
       }
       onActivateRequested: {
         if (root.ready) root.copySelected()
-        else if (authenticator.hidden) authenticator.showCodes()
-        else if (authenticator.locked || authenticator.paused) authenticator.refresh()
-        else authenticator.launchLogin()
+        else root.runAction(root.primary.id)
       }
       onCloseRequested: root.close()
       onTabRequested: function(direction) { root.switchPanel(direction) }
@@ -199,6 +248,8 @@ Panel {
         if (text === "/") searchField.forceActiveFocus()
         else if (text === "r" || text === "R") authenticator.refresh()
         else if (text === "c" || text === "C") root.copySelected()
+        else if ((text === "a" || text === "A") && authenticator.available) root.openProton("add")
+        else if ((text === "m" || text === "M") && authenticator.available) root.openProton("manage")
         // Lowercase `l` is consumed upstream as the "move right" cursor verb and
         // never reaches this handler, so the privacy toggle is bound to `L`.
         // This is a panel-local toggle: it never asks the helper to forget.
@@ -302,11 +353,37 @@ Panel {
           }
 
           Button {
+            visible: root.maintenanceNotice
+            width: parent.width
+            text: root.primary.label
+            foreground: root.foreground
+            onClicked: root.runAction(root.primary.id)
+          }
+
+          Button {
             visible: root.ready && !authenticator.synced
             width: parent.width
             text: "Sign in to Proton sync"
             foreground: root.foreground
-            onClicked: authenticator.launchLogin()
+            onClicked: root.openProton("login")
+          }
+
+          Row {
+            visible: root.ready
+            width: parent.width
+            spacing: Style.space(8)
+            Button {
+              width: (parent.width - parent.spacing) / 2
+              text: "Add code"
+              foreground: root.foreground
+              onClicked: root.openProton("add")
+            }
+            Button {
+              width: (parent.width - parent.spacing) / 2
+              text: "Manage in Proton"
+              foreground: root.foreground
+              onClicked: root.openProton("manage")
+            }
           }
 
           Column {
@@ -317,12 +394,7 @@ Panel {
             Text {
               width: parent.width
               textFormat: Text.PlainText
-              text: Model.hintMessage({
-                hidden: authenticator.hidden,
-                paused: authenticator.paused,
-                state: authenticator.state,
-                locked: authenticator.locked
-              })
+              text: root.hint()
               color: root.dim
               font.family: root.fontFamily
               font.pixelSize: Style.font.bodySmall
@@ -331,23 +403,23 @@ Panel {
             }
 
             Button {
+              visible: root.primary.id !== ""
               width: parent.width
-              text: authenticator.hidden
-                ? "Show codes in this panel"
-                : (authenticator.paused || authenticator.locked ? "Check again" : "Sign in with Proton")
+              text: root.primary.label
               foreground: root.foreground
-              onClicked: {
-                if (authenticator.hidden) authenticator.showCodes()
-                else if (authenticator.paused || authenticator.locked) authenticator.refresh()
-                else authenticator.launchLogin()
-              }
+              onClicked: root.runAction(root.primary.id)
             }
 
             Button {
+              visible: authenticator.phase === "install" || authenticator.phase === "migrate"
+                || authenticator.phase === "update"
               width: parent.width
-              text: "Review pinned source"
+              text: "What gets installed?"
               foreground: root.foreground
-              onClicked: authenticator.openHelperSource()
+              onClicked: {
+                root.close()
+                authenticator.openHelperSource()
+              }
             }
           }
 
@@ -357,10 +429,11 @@ Panel {
             width: parent.width
             textFormat: Text.PlainText
             text: root.ready
-              ? "j/k select  ·  enter/c copy  ·  / search  ·  r refresh  ·  L hide"
+              ? "enter copy  ·  / search  ·  a add  ·  m manage  ·  L hide  ·  x clear…"
               : (authenticator.hidden
                 ? "enter/L show codes  ·  x clear helper copy…"
-                : "enter sign in  ·  r refresh  ·  x clear helper copy…")
+                : (root.primary.id !== "" ? "enter " + root.primary.label.toLowerCase() + "  ·  r refresh"
+                                          : "r refresh"))
             color: root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption

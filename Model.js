@@ -13,6 +13,12 @@ var MAX_TEXT = 160;
 // would wedge the staleness comparison for the life of the session, so bound
 // what a snapshot is allowed to claim.
 var MAX_GENERATION = 2147483647;
+// Helper feature level this panel needs: the `open` op, `latched`, and
+// `binaryReplaced`. An older helper still serves codes but is reported as
+// needing an update.
+var REQUIRED_HELPER_API = 2;
+var HELPER_PACKAGE = "proton-authenticator-omarchy-helper";
+var HELPER_UNIT = "proton-authenticator-omarchy-helper.service";
 
 function utf8ByteLength(value) {
   var s = String(value || "");
@@ -103,6 +109,8 @@ var ERROR_MESSAGES = {
   "clipboard_failed": "Could not write the clipboard",
   "unsupported_operation": "Secure helper rejected the request",
   "invalid_request": "Secure helper rejected the request",
+  "invalid_view": "Secure helper rejected the request",
+  "invalid view": "Secure helper rejected the request",
   "response_too_large": "Secure helper sent an invalid response"
 };
 
@@ -131,10 +139,29 @@ function emptyHelperSnapshot(error) {
     generation: 0,
     instance: "",
     sourceCommit: "",
+    api: 0,
+    helperVersion: "",
+    latched: false,
+    binaryReplaced: false,
     now: 0,
     entries: [],
     error: publicError(error || "helper client rejected")
   };
+}
+
+// A generation above the cap is not something a real helper produces. Clamping
+// it would still raise the panel's floor to the cap and silently reject every
+// genuine snapshot until the helper restarted, so the whole response is
+// rejected instead.
+function generationInRange(value) {
+  if (value === undefined || value === null) return true;
+  var n = Number(value);
+  return isFinite(n) && n >= 0 && n <= MAX_GENERATION;
+}
+
+function safeHelperVersion(value) {
+  var s = String(value === undefined || value === null ? "" : value);
+  return /^[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}(\+omarchy\.[0-9]{1,6})?$/.test(s) ? s : "";
 }
 
 // Helper instance identifiers are 32 lowercase hex characters (a 128-bit
@@ -162,6 +189,7 @@ function parseHelperSnapshot(text) {
   try { data = JSON.parse(raw); } catch (e) { return emptyHelperSnapshot("invalid helper response"); }
   if (!data || typeof data !== "object" || data.v !== 1 || data.ok !== true)
     return emptyHelperSnapshot(data && data.error ? data.error : "helper client rejected");
+  if (!generationInRange(data.generation)) return emptyHelperSnapshot("invalid helper response");
 
   var allowedStates = { ready: true, locked: true, needs_login: true, unavailable: true, error: true };
   var state = String(data.state || "unavailable");
@@ -211,6 +239,10 @@ function parseHelperSnapshot(text) {
     generation: generation,
     instance: safeInstance(data.instance),
     sourceCommit: safeSourceCommit(data.sourceCommit),
+    api: Math.max(0, Math.min(255, Math.floor(Number(data.api) || 0))),
+    helperVersion: safeHelperVersion(data.helperVersion),
+    latched: data.latched === true,
+    binaryReplaced: data.binaryReplaced === true,
     now: now,
     entries: entries,
     error: publicError(data.error || "")
@@ -296,6 +328,87 @@ function acceptsSnapshot(currentInstance, currentFloor, incomingInstance, incomi
   return shouldAcceptGeneration(currentFloor, incomingGeneration);
 }
 
+// Result of `helper_client.py probe`: local facts only (package installed,
+// unit state, a leftover pre-package development install), never a socket.
+function parseProbe(text) {
+  var data = null;
+  try { data = JSON.parse(String(text || "")); } catch (e) { data = null; }
+  if (!data || typeof data !== "object" || data.v !== 1 || data.ok !== true)
+    return { ok: false, installed: false, unit: "unknown", legacy: false, conflict: false };
+  var units = { active: true, activating: true, inactive: true, failed: true, deactivating: true };
+  var unit = String(data.unit || "");
+  return {
+    ok: true,
+    installed: data.installed === true,
+    unit: units[unit] ? unit : "unknown",
+    legacy: data.legacy === true,
+    conflict: data.conflict === true
+  };
+}
+
+// Single source of truth for what the panel shows and what its main button
+// does. Each phase has exactly one primary action.
+//   install   — helper package missing (or a conflicting Proton app is)
+//   migrate   — only the old hand-built development helper is present
+//   start     — package installed, service not running
+//   starting  — service running, socket not up yet
+//   update    — running helper is older than this panel needs
+//   restart   — package upgraded but the old process is still serving
+//   locked    — helper copy cleared; a restart brings codes back
+//   signin    — helper up, no Proton account yet
+//   paused    — helper up, its web view has not published recently
+//   hidden    — rows hidden in this panel only
+//   ready     — codes available
+function setupPhase(view) {
+  var v = view || {};
+  if (v.hidden === true) return "hidden";
+  if (v.available !== true) {
+    var p = v.probe || {};
+    if (p.ok !== true) return "starting";
+    if (p.conflict === true) return "install";
+    if (p.legacy === true) return "migrate";
+    if (p.installed !== true) return "install";
+    if (p.unit === "active" || p.unit === "activating") return "starting";
+    return "start";
+  }
+  if (v.latched === true) return "locked";
+  if (Math.floor(Number(v.api) || 0) < REQUIRED_HELPER_API) {
+    // An old helper is answering. Which fix applies depends on what is on
+    // disk: a leftover hand-built install is switched over (no download); an
+    // installed package means the old process predates it and only needs a
+    // restart; otherwise fetch the package.
+    var q = v.probe || {};
+    if (q.ok === true && q.legacy === true) return "migrate";
+    if (q.ok === true && q.installed === true) return "restart";
+    return "update";
+  }
+  if (v.binaryReplaced === true) return "restart";
+  // Proton's own app lock (PIN/password set in Proton's settings), as opposed
+  // to this panel's one-way latch above.
+  if (v.locked === true) return "applock";
+  if (v.paused === true) return "paused";
+  if (v.state === "ready") return "ready";
+  if (v.state === "needs_login") return "signin";
+  return "paused";
+}
+
+function primaryAction(phase) {
+  switch (phase) {
+    case "install": return { id: "install", label: "Install secure helper" };
+    case "migrate": return { id: "install", label: "Switch to the packaged helper" };
+    case "update": return { id: "install", label: "Update secure helper" };
+    case "start": return { id: "start", label: "Start secure helper" };
+    case "restart": return { id: "restart", label: "Restart helper to finish updating" };
+    case "locked": return { id: "restart", label: "Restart helper to show codes again" };
+    case "applock": return { id: "manage", label: "Unlock in Proton Authenticator" };
+    case "signin": return { id: "login", label: "Sign in with Proton" };
+    case "paused": return { id: "refresh", label: "Check again" };
+    case "hidden": return { id: "show", label: "Show codes in this panel" };
+    case "starting": return { id: "refresh", label: "Check again" };
+    default: return { id: "", label: "" };
+  }
+}
+
 function remainingSeconds(validUntil, now) {
   var end = Math.floor(Number(validUntil) || 0);
   var current = Math.floor(Number(now) || 0);
@@ -324,7 +437,7 @@ function parseLockResponse(text) {
   var data = null;
   try { data = JSON.parse(String(text || "")); } catch (e) { data = null; }
   var ok = !!data && typeof data === "object" && data.v === 1
-    && data.ok === true && data.locked === true;
+    && data.ok === true && data.locked === true && generationInRange(data.generation);
   return {
     ok: ok,
     generation: ok ? clampGeneration(data.generation) : 0,
@@ -346,10 +459,19 @@ function statusMessage(view) {
   var v = view || {};
   if (v.checked !== true) return "Connecting to secure helper…";
   if (v.hidden === true) return "Codes hidden in this panel";
-  if (v.available !== true) return publicError(v.error) || "Secure helper unavailable";
+  if (v.available !== true) {
+    var phase = setupPhase(v);
+    if (phase === "install") return (v.probe && v.probe.conflict) ? "Proton's own app is installed" : "Secure helper not installed";
+    if (phase === "migrate") return "Development helper found";
+    if (phase === "start") return "Secure helper is stopped";
+    return publicError(v.error) || "Secure helper unavailable";
+  }
+  if (v.latched === true) return "Helper copy cleared";
+  if (Math.floor(Number(v.api) || 0) < REQUIRED_HELPER_API) return "Secure helper needs an update";
+  if (v.binaryReplaced === true) return "Update installed · restart pending";
   if (v.paused === true) return "Codes paused · waiting for the helper";
   if (v.state === "needs_login") return "Sign in to enable encrypted sync";
-  if (v.locked === true) return "Helper copy cleared";
+  if (v.locked === true) return "Locked by Proton's app lock";
   if (v.error) return publicError(v.error);
   var count = Math.max(0, Math.floor(Number(v.entryCount) || 0));
   return count + (count === 1 ? " code" : " codes") + (v.synced === true ? " · synced" : " · local");
@@ -359,26 +481,49 @@ var HELPER_RESTART_COMMAND = "systemctl --user restart proton-authenticator-omar
 
 function hintMessage(view) {
   var v = view || {};
+  var phase = setupPhase(v);
+  if (phase === "install" && v.probe && v.probe.conflict)
+    return "The helper replaces Proton's own Linux app (they share one data folder and cannot run together). Your codes stay on your Proton account.";
+  if (phase === "install")
+    return "Codes come from Proton's official Authenticator, built from source with a private local socket. One-time install from the AUR; omarchy update keeps it current.";
+  if (phase === "migrate")
+    return "A hand-built development helper is running. Switch to the packaged one so omarchy update keeps it current. Your codes and sign-in are kept.";
+  if (phase === "start") return "The helper is installed but not running.";
+  if (phase === "starting") return "Waiting for the secure helper to start…";
+  if (phase === "update")
+    return "The running helper is older than this panel. Update it; your codes and sign-in are kept.";
+  if (phase === "restart")
+    return "A new helper version is installed. It switches over by itself when the Proton window is closed, or restart it now.";
   if (v.hidden === true)
     return "Rows are hidden in this panel only. The helper still holds the codes until you clear its copy.";
+  if (v.latched === true)
+    return "The helper cleared its copy of the codes. Restarting it brings them back.";
+  if (v.locked === true)
+    return "Proton Authenticator is locked with its own PIN or password. Unlock it in Proton's window.";
   if (v.paused === true)
     return "The helper's last snapshot expired. Rows return as soon as the Proton helper publishes again.";
   if (v.state === "needs_login")
-    return "Sign in through the pinned Proton helper once. Normal code access stays in this popup.";
-  if (v.locked === true)
-    return "The helper cleared its copy of the codes. To get them back, restart it: " + HELPER_RESTART_COMMAND;
+    return "Sign in once in Proton's own window. Your codes then sync from your other devices and stay in this popup.";
   return "The pinned Proton helper is not available yet.";
 }
 
 var LOCK_CONFIRM_MESSAGE =
-  "Clear the helper's copy of every code? This cannot be undone from the panel; " +
-  "the helper stays locked until you run " + HELPER_RESTART_COMMAND + ".";
+  "Clear the helper's copy of every code? Codes stay hidden everywhere until " +
+  "you restart the helper from this panel.";
 
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     MAX_HELPER_BYTES: MAX_HELPER_BYTES,
     MAX_HELPER_ENTRIES: MAX_HELPER_ENTRIES,
     MAX_GENERATION: MAX_GENERATION,
+    REQUIRED_HELPER_API: REQUIRED_HELPER_API,
+    HELPER_PACKAGE: HELPER_PACKAGE,
+    HELPER_UNIT: HELPER_UNIT,
+    generationInRange: generationInRange,
+    safeHelperVersion: safeHelperVersion,
+    parseProbe: parseProbe,
+    setupPhase: setupPhase,
+    primaryAction: primaryAction,
     HELPER_RESTART_COMMAND: HELPER_RESTART_COMMAND,
     LOCK_CONFIRM_MESSAGE: LOCK_CONFIRM_MESSAGE,
     utf8ByteLength: utf8ByteLength,

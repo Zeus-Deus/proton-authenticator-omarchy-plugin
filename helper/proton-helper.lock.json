@@ -2,15 +2,26 @@
   "protocolVersion": 1,
   "protonWebClients": {
     "upstream": "https://github.com/ProtonMail/WebClients",
+    "protonVersion": "1.1.6",
+    "releaseBranch": "release/proton-authenticator@1.1.6",
+    "baseCommit": "0deabe38e304f5d42d6a72783c64c1884c17fce3",
+    "baseTarballSha256": "80848edca68c31d97fde946748a0b6c21ed851de80b57f26d8534b4b493ac323",
     "fork": "https://github.com/Zeus-Deus/WebClients",
-    "baseCommit": "67e20e4f558c6a990444759bc6ebd10f47cab445",
     "helperBranch": "omarchy-authenticator-helper",
-    "helperCommit": "ce465e3717a54a3639b57d96a935ea5a3f658eed"
+    "helperCommit": "8254c6175512ab7e35bb3c2ac73395b49d3cefde",
+    "patch": "packaging/aur/omarchy-helper.patch",
+    "patchSha256": "4b2c9aa036c1b15e6eab35de7bc0a3dcb602f81cb3a4393595f923b2620930f5"
   },
   "authenticatorRustCore": {
     "package": "@protontech/authenticator-rust-core",
     "version": "0.28.8",
     "integrity": "sha512-1pjTHiWq+ok5BOJdnckBC9kEyvIb7H5t7/XoqYVov0RhX1+b0PPatiMlXem3pZDLE3n8TKRP567vGnnKHStAjw=="
   },
-  "officialCoreDependencyUsedByFixtureOnly": true
+  "officialCoreDependencyUsedByFixtureOnly": true,
+  "helperApi": 2,
+  "package": {
+    "name": "proton-authenticator-omarchy-helper",
+    "version": "1.1.6.omarchy1-1",
+    "aur": "https://aur.archlinux.org/packages/proton-authenticator-omarchy-helper"
+  }
 }

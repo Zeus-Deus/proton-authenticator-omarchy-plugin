@@ -14,6 +14,7 @@ import re
 import secrets
 import socket
 import stat
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -24,7 +25,10 @@ TOTAL_DEADLINE_SECONDS = 5.0
 ITEM_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 # `unlock` is absent by design: the helper no longer serves it, and a socket
 # release path would let any same-uid process resume publication of live codes.
-OPS = {"status", "snapshot", "copy", "lock"}
+OPS = {"status", "snapshot", "copy", "lock", "open"}
+# Proton windows the panel may ask the running helper to surface. Opening a
+# window carries no credentials and never releases the lock latch.
+VIEWS = {"manage", "login", "add"}
 # Set by `--allow-socket-override`, which only the test suite passes.
 ALLOW_SOCKET_OVERRIDE = False
 # Every error this client can emit. Anything else that escapes (an unexpected
@@ -35,6 +39,7 @@ KNOWN_ERRORS = {
     "unsupported operation",
     "invalid item id",
     "item id is only valid for copy",
+    "invalid view",
     "helper socket override rejected",
     "helper runtime directory is unavailable",
     "helper runtime path is not a directory",
@@ -100,18 +105,24 @@ def verify_socket(path: Path) -> None:
         raise RuntimeError("helper socket is not owner-private")
 
 
-def request(op: str, item_id: str = "") -> dict:
+def request(op: str, argument: str = "") -> dict:
     if op not in OPS:
         raise ValueError("unsupported operation")
+    item_id = argument if op == "copy" else ""
+    view = argument if op == "open" else ""
     if op == "copy" and not ITEM_ID_RE.fullmatch(item_id):
         raise ValueError("invalid item id")
-    if op != "copy" and item_id:
+    if op == "open" and view not in VIEWS:
+        raise ValueError("invalid view")
+    if op not in {"copy", "open"} and argument:
         raise ValueError("item id is only valid for copy")
 
     request_id = secrets.token_hex(8)
     payload: dict[str, object] = {"v": 1, "id": request_id, "op": op}
     if item_id:
         payload["itemId"] = item_id
+    if view:
+        payload["view"] = view
     encoded = json.dumps(payload, separators=(",", ":")).encode() + b"\n"
 
     path = socket_path()
@@ -154,6 +165,52 @@ def request(op: str, item_id: str = "") -> dict:
     return response
 
 
+HELPER_BINARY = Path("/usr/bin/proton-authenticator-omarchy-helper")
+HELPER_UNIT = "proton-authenticator-omarchy-helper.service"
+# Proton's own Linux app shares the helper's app id, data folder, keyring entry
+# and single-instance D-Bus name, so the two cannot coexist.
+CONFLICTING_BINARIES = (Path("/usr/bin/proton-authenticator"),)
+SYSTEMCTL = "/usr/bin/systemctl"
+
+
+def probe() -> dict:
+    """Local setup facts for the panel's install/start/migrate states.
+
+    Reads only file metadata and one `systemctl --user show` property. It never
+    connects to the helper socket, so it is safe to run while the helper is
+    down or not installed at all.
+    """
+    home = Path(os.environ.get("HOME", "") or "/nonexistent")
+    # A hand-built development install. Its user unit in ~/.config shadows the
+    # packaged one in /usr/lib/systemd/user, so it counts even next to the package.
+    legacy = (
+        (home / ".local/opt/proton-authenticator-omarchy-helper/proton-authenticator").is_file()
+        or (home / ".config/systemd/user" / HELPER_UNIT).is_file()
+    )
+    unit = "unknown"
+    try:
+        result = subprocess.run(
+            [SYSTEMCTL, "--user", "show", "--property=ActiveState", "--value", HELPER_UNIT],
+            capture_output=True,
+            text=True,
+            timeout=2,
+            check=False,
+        )
+        value = result.stdout.strip()
+        if value in {"active", "activating", "inactive", "failed", "deactivating"}:
+            unit = value
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return {
+        "v": 1,
+        "ok": True,
+        "installed": HELPER_BINARY.is_file() and os.access(HELPER_BINARY, os.X_OK),
+        "unit": unit,
+        "legacy": legacy,
+        "conflict": any(path.exists() for path in CONFLICTING_BINARIES),
+    }
+
+
 def error_identifier(error: BaseException) -> str:
     message = str(error)
     return message if message in KNOWN_ERRORS else "helper client failure"
@@ -165,6 +222,9 @@ def main(argv: list[str]) -> int:
     if args and args[0] == "--allow-socket-override":
         ALLOW_SOCKET_OVERRIDE = True
         args = args[1:]
+    if args == ["probe"]:
+        print(json.dumps(probe(), separators=(",", ":")))
+        return 0
     if len(args) not in {1, 2}:
         print('{"v":1,"ok":false,"state":"unavailable","error":"usage"}')
         return 2

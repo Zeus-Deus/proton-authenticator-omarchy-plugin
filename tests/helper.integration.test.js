@@ -162,8 +162,9 @@ test('an expired helper snapshot degrades to stale and refuses to copy', async (
   assert.equal(Model.isPaused(view), true);
   assert.deepEqual(view.entries, []);
   assert.equal(Model.statusMessage({
-    checked: true, available: view.ok, paused: Model.isPaused(view), state: view.state
+    checked: true, available: view.ok, paused: Model.isPaused(view), state: view.state, api: view.api
   }), 'Codes paused · waiting for the helper');
+  assert.equal(Model.setupPhase({ available: view.ok, paused: Model.isPaused(view), state: view.state, api: view.api }), 'paused');
 
   // Copy is refused with the distinct stale error, not a generic failure.
   const copied = runClient(socketPath, ['copy', 'fixture-rfc6238']);
@@ -387,4 +388,117 @@ test('a restarted helper reports a new instance so the panel floor can reset', a
   assert.equal(panel.reset, true);
   assert.equal(panel.instance, 'b'.repeat(32));
   assert.equal(panel.floor, fresh.generation);
+});
+
+async function startFixture(t, extraEnv = {}) {
+  const runtime = fs.mkdtempSync(path.join(os.tmpdir(), 'proton-auth-open-test-'));
+  const socketPath = path.join(runtime, 'helper.sock');
+  const server = childProcess.spawn(process.execPath, ['--experimental-wasm-modules', fixture, '--fixture'], {
+    cwd: root,
+    env: {
+      ...process.env,
+      PROTON_AUTH_HELPER_SOCKET: socketPath,
+      PROTON_AUTH_FIXTURE: '1',
+      PROTON_AUTH_FIXTURE_TIME: '59',
+      ...extraEnv,
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  t.after(() => {
+    server.kill('SIGTERM');
+    fs.rmSync(runtime, { recursive: true, force: true });
+  });
+  await new Promise((resolve, reject) => {
+    let stderr = '';
+    const timer = setTimeout(() => reject(new Error(`fixture readiness timeout: ${stderr}`)), 10000);
+    server.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+    server.once('exit', (code) => reject(new Error(`fixture exited ${code}: ${stderr}`)));
+    server.stdout.on('data', (chunk) => {
+      if (chunk.toString().includes('"ready":true')) {
+        clearTimeout(timer);
+        resolve();
+      }
+    });
+  });
+  return socketPath;
+}
+
+test('open surfaces only allow-listed Proton views and never touches codes or the lock', async (t) => {
+  const socketPath = await startFixture(t);
+  for (const view of ['manage', 'login', 'add']) {
+    const opened = runClient(socketPath, ['open', view]);
+    assert.equal(opened.status, 0, opened.stdout + opened.stderr);
+    const payload = JSON.parse(opened.stdout);
+    assert.equal(payload.ok, true);
+    assert.equal(payload.views.at(-1), view);
+    // No code material in an open response.
+    assert.doesNotMatch(opened.stdout, /entries|"code"|nextCode/);
+  }
+  // Unknown views, missing views, and option-looking views are refused by the
+  // client before any socket traffic, with a fixed error identifier.
+  for (const args of [['open', 'settings'], ['open'], ['open', '--login'], ['open', 'login', 'extra']]) {
+    const refused = runClient(socketPath, args);
+    assert.notEqual(refused.status, 0, args.join(' '));
+    const body = JSON.parse(refused.stdout);
+    assert.equal(body.ok, false);
+    assert.match(body.error, /^(invalid view|usage)$/);
+  }
+  // Opening a window did not release or engage anything.
+  const lock = runClient(socketPath, ['lock']);
+  assert.equal(JSON.parse(lock.stdout).locked, true);
+  runClient(socketPath, ['open', 'manage']);
+  const after = JSON.parse(runClient(socketPath, ['snapshot']).stdout);
+  assert.equal(after.state, 'locked');
+  assert.equal(after.latched, true);
+  assert.deepEqual(after.entries, []);
+  const view = Model.parseHelperSnapshot(JSON.stringify(after));
+  assert.equal(Model.setupPhase({ available: true, api: view.api, latched: view.latched, locked: view.locked, state: view.state }), 'locked');
+});
+
+test('an older helper still serves codes but the panel asks for an update', async (t) => {
+  const socketPath = await startFixture(t, { PROTON_AUTH_FIXTURE_API: '1' });
+  const snapshot = runClient(socketPath, ['snapshot']);
+  const view = Model.parseHelperSnapshot(snapshot.stdout);
+  assert.equal(view.ok, true);
+  assert.equal(view.entries.length, 2);
+  assert.equal(view.api, 0);
+  assert.equal(Model.setupPhase({ available: true, api: view.api, state: view.state }), 'update');
+  // The api-1 helper has no `open` op; the refusal is a fixed identifier.
+  const opened = runClient(socketPath, ['open', 'login']);
+  assert.equal(opened.status, 1);
+  assert.equal(Model.publicError(JSON.parse(opened.stdout).error), 'Secure helper rejected the request');
+});
+
+test('a helper whose binary was upgraded asks for a restart while still serving codes', async (t) => {
+  const socketPath = await startFixture(t, { PROTON_AUTH_FIXTURE_REPLACED: '1' });
+  const view = Model.parseHelperSnapshot(runClient(socketPath, ['snapshot']).stdout);
+  assert.equal(view.binaryReplaced, true);
+  assert.equal(view.entries.length, 2);
+  assert.equal(view.helperVersion, '1.1.6+omarchy.1');
+  assert.equal(Model.setupPhase({ available: true, api: view.api, binaryReplaced: true, state: view.state }), 'restart');
+});
+
+test('probe reports local setup facts without contacting any socket', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'proton-auth-probe-'));
+  try {
+    const run = () => childProcess.spawnSync('/usr/bin/python3', [client, 'probe'], {
+      env: { ...process.env, HOME: home, XDG_RUNTIME_DIR: path.join(home, 'no-runtime') },
+      encoding: 'utf8',
+      timeout: 5000,
+    });
+    let result = run();
+    assert.equal(result.status, 0, result.stderr);
+    let probe = Model.parseProbe(result.stdout);
+    assert.equal(probe.ok, true);
+    assert.equal(probe.legacy, false);
+    assert.match(probe.unit, /^(active|activating|inactive|failed|deactivating|unknown)$/);
+    // A development install leaves a user unit that shadows the package's.
+    fs.mkdirSync(path.join(home, '.config', 'systemd', 'user'), { recursive: true });
+    fs.writeFileSync(path.join(home, '.config', 'systemd', 'user', 'proton-authenticator-omarchy-helper.service'), '');
+    probe = Model.parseProbe(run().stdout);
+    assert.equal(probe.legacy, true);
+    assert.equal(Model.setupPhase({ available: false, probe }), 'migrate');
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
 });

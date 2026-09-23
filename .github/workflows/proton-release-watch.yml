@@ -1,0 +1,48 @@
+name: Proton release watch
+
+# Opens an issue when Proton publishes a new Linux build of Proton
+# Authenticator, so the helper package can be rebuilt against the new source.
+# Runs on GitHub only; the plugin itself never checks for updates.
+
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compare Proton's published version with the pin
+        id: compare
+        run: |
+          set -euo pipefail
+          pinned=$(jq -r '.protonWebClients.protonVersion' helper/proton-helper.lock.json)
+          latest=$(curl -fsSL --max-time 30 https://proton.me/download/authenticator/linux/version.json \
+            | jq -r '[.Releases[] | select(.CategoryName == "Stable")][0].Version')
+          [[ "$latest" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "unexpected version: $latest"; exit 1; }
+          echo "pinned=$pinned" >> "$GITHUB_OUTPUT"
+          echo "latest=$latest" >> "$GITHUB_OUTPUT"
+          echo "Pinned $pinned, Proton publishes $latest"
+
+      - name: Open an issue for a new release
+        if: steps.compare.outputs.latest != steps.compare.outputs.pinned
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PINNED: ${{ steps.compare.outputs.pinned }}
+          LATEST: ${{ steps.compare.outputs.latest }}
+        run: |
+          set -euo pipefail
+          title="Proton Authenticator $LATEST released (helper pinned to $PINNED)"
+          if gh issue list --state open --search "in:title \"$title\"" --json number --jq 'length' | grep -qx 0; then
+            gh issue create --title "$title" --body "Proton published Authenticator $LATEST for Linux; the helper package is built from $PINNED.
+
+          Follow [Updating the pinned Proton release](docs/DEVELOPMENT.md#updating-the-pinned-proton-release).
+          Source: https://github.com/ProtonMail/WebClients/tree/release/proton-authenticator@$LATEST"
+          fi

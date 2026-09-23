@@ -18,8 +18,15 @@ test('every helper client spawn pins an absolute interpreter, never a PATH looku
   assert.match(service, /readonly property string pythonBinary:\s*"\/usr\/bin\/python3"/);
   assert.doesNotMatch(executableCode, /command\s*=\s*\[\s*"python3"/);
   const spawns = service.match(/command\s*=\s*\[[^\]]*\]/g) || [];
-  assert.equal(spawns.length, 3);
-  for (const spawn of spawns) assert.match(spawn, /^command\s*=\s*\[pythonBinary,/);
+  // snapshot, copy, lock, open, probe go through the client; the two unit
+  // actions call systemctl directly by absolute path.
+  assert.equal(spawns.length, 7);
+  const client = spawns.filter((spawn) => /\[pythonBinary,/.test(spawn));
+  const unit = spawns.filter((spawn) => /\[systemctl,/.test(spawn));
+  assert.equal(client.length, 5);
+  assert.equal(unit.length, 2);
+  assert.match(service, /readonly property string systemctl:\s*"\/usr\/bin\/systemctl"/);
+  for (const spawn of unit) assert.match(spawn, /\[systemctl, "--user", "(enable", "--now|restart)", helperUnit\]/);
 });
 
 test('panel close clears rows and snapshot output is not retained in a collector', () => {
@@ -60,9 +67,13 @@ test('snapshot polling keeps Repeater delegates when rows did not change', () =>
 
 test('every external executable is an absolute path', () => {
   assert.match(service, /readonly property string browserLauncher:\s*"\/usr\/share\/omarchy\/bin\/omarchy-launch-browser"/);
+  assert.match(service, /readonly property string terminalLauncher:\s*"\/usr\/share\/omarchy\/bin\/omarchy-launch-floating-terminal-with-presentation"/);
   const detached = executableCode.match(/execDetached\(\[[\s\S]*?\]\)/g) || [];
   assert.equal(detached.length, 2);
   for (const call of detached) assert.doesNotMatch(call, /\[\s*"[^\/]/);
+  // The installer's only argument is a fixed mode; the script path is quoted.
+  assert.match(service, /execDetached\(\[terminalLauncher, Util\.shellQuote\(setupScript\) \+ " " \+ arg\]\)/);
+  assert.match(service, /var arg = mode === "update" \? "update" : "install"/);
 });
 
 test('the panel renders current and next codes from validated helper rows', () => {
@@ -76,10 +87,17 @@ test('reopen and search reset the scroll position', () => {
   assert.match(panel, /onTextChanged:[\s\S]{0,100}panelFlick\.contentY = 0/);
 });
 
-test('ready local state exposes a Proton sync sign-in action', () => {
+test('ready local state exposes Proton sign-in, add, and manage through the running helper', () => {
   assert.match(panel, /Sign in to Proton sync/);
   assert.match(panel, /!authenticator\.synced/);
-  assert.match(panel, /authenticator\.launchLogin\(\)/);
+  assert.match(panel, /onClicked: root\.openProton\("login"\)/);
+  assert.match(panel, /onClicked: root\.openProton\("add"\)/);
+  assert.match(panel, /onClicked: root\.openProton\("manage"\)/);
+  // Proton's window opens under the full-screen panel layer: close first.
+  assert.match(panel, /function openProton\(view\) \{\s*root\.close\(\)\s*authenticator\.openView\(view\)/);
+  // Views are a fixed allow-list, sent to the socket, never exec'd.
+  assert.match(service, /\["login", "manage", "add"\]\.indexOf\(view\) === -1/);
+  assert.match(service, /openProcess\.command = \[pythonBinary, clientPath, "open", view\]/);
 });
 
 test('copy sends only an opaque item id to the helper', () => {
@@ -167,17 +185,34 @@ test('transient action feedback expires instead of becoming stale state', () => 
   assert.match(service, /root\.actionStatus = ""/);
 });
 
-test('login handoff launches a fixed helper executable without credentials', () => {
-  assert.match(service, /proton-authenticator-omarchy-helper/);
-  assert.doesNotMatch(service, /launchLogin[\s\S]{0,500}(password|token|secret)/i);
+test('the panel never launches a helper binary of its own', () => {
+  // The old path exec'd the binary, which reached the running service over
+  // D-Bus or, if none ran, started a second process outside the sandbox.
+  assert.doesNotMatch(executableCode, /helperBinary|--login|launchLogin/);
+  assert.doesNotMatch(executableCode, /\.local\/bin\/proton-authenticator/);
+  assert.doesNotMatch(service, /openView[\s\S]{0,600}(password|token|secret)/i);
 });
 
-test('review action opens the exact pinned helper commit', () => {
+test('the pinned helper commit matches the lock file and the AUR package', () => {
   const lock = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'helper', 'proton-helper.lock.json'), 'utf8'));
   const pinned = lock.protonWebClients.helperCommit;
   assert.match(pinned, /^[0-9a-f]{40}$/);
   assert.match(service, new RegExp(`readonly property string helperCommit: "${pinned}"`));
-  assert.match(service, /WebClients\/commit\/" \+ helperCommit/);
+  const pkgbuild = fs.readFileSync(path.join(__dirname, '..', 'packaging', 'aur', 'PKGBUILD'), 'utf8');
+  assert.match(pkgbuild, new RegExp(`^_patchcommit=${pinned}$`, 'm'));
+  assert.match(pkgbuild, new RegExp(`^_protoncommit=${lock.protonWebClients.baseCommit}$`, 'm'));
+  assert.match(pkgbuild, new RegExp(`^_protonver=${lock.protonWebClients.protonVersion.replace(/\./g, '\\.')}$`, 'm'));
+});
+
+test('every setup phase has a reachable panel action', () => {
+  for (const id of ['install', 'start', 'restart', 'login', 'manage', 'add', 'show', 'refresh'])
+    assert.match(panel, new RegExp(`case "${id}":`), id);
+  assert.match(panel, /else root\.runAction\(root\.primary\.id\)/);
+  assert.match(service, /function runSetup\(mode\)/);
+  assert.match(service, /function startHelper\(\)/);
+  assert.match(service, /function restartHelper\(\)/);
+  // The probe runs only when the socket is down.
+  assert.match(service, /if \(!next\.ok \|\| next\.api < Model\.REQUIRED_HELPER_API\) runProbe\(\)/);
 });
 
 test('the scroll target skips the Repeater that precedes the row delegates', () => {
