@@ -222,3 +222,27 @@ test('the scroll target skips the Repeater that precedes the row delegates', () 
   assert.match(panel, /codeColumn\.children\[childIndex\]/);
   assert.doesNotMatch(panel, /codeColumn\.children\[selectedIndex\]/);
 });
+
+test('the code list scrolls a fixed step per wheel notch, not a kinetic flick', () => {
+  assert.match(panel, /WheelHandler \{[\s\S]{0,200}panelFlick\.contentY = Model\.wheelScroll\(panelFlick\.contentY/);
+  assert.match(panel, /event\.accepted = true/);
+});
+
+test('a code rollover updates rows in place instead of rebuilding the list', () => {
+  // The Repeater is keyed by the row count, so a new code for the same rows
+  // keeps every delegate; each row reads its entry by index.
+  assert.match(panel, /Repeater \{[\s\S]{0,300}model: root\.filteredEntries\.length/);
+  assert.match(panel, /entry: root\.filteredEntries\[index\] \|\| \(\{\}\)/);
+  assert.match(panel, /onTextChanged: codeFade\.restart\(\)/);
+});
+
+test('a copy confirms on the copied row by opaque id and never keeps the code', () => {
+  assert.match(service, /property string copiedId: ""/);
+  assert.match(service, /pendingCopyId = id/);
+  assert.match(service, /if \(result\.ok\) \{\s*root\.copiedId = root\.pendingCopyId/);
+  assert.match(panel, /authenticator\.copiedId === entry\.id/);
+  assert.match(panel, /current: copied/);
+  // The copied marker is cleared with the rows when the panel closes.
+  assert.match(service, /function clearVisibleRows\(\)[\s\S]{0,120}copiedId = ""/);
+  assert.doesNotMatch(service, /copiedCode|lastCode/);
+});

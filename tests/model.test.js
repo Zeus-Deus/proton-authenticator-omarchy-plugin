@@ -301,8 +301,20 @@ test('rows whose window already closed by the helper clock are dropped', () => {
   });
   const at = (now, rows) => M.parseHelperSnapshot(JSON.stringify({ v: 1, ok: true, state: 'ready', generation: 1, now, entries: rows }));
   assert.equal(at(59, [row(60)]).entries.length, 1, 'one second left is current');
-  assert.equal(at(60, [row(60)]).entries.length, 0, 'validUntil == now has rolled over');
-  assert.equal(at(61, [row(60)]).entries.length, 0);
+  assert.equal(at(59, [row(60)]).entries[0].code, '123456');
+  // Within one window of the rollover the next code is promoted, so the row
+  // does not vanish until the next publication.
+  const rolled = at(60, [row(60)]).entries;
+  assert.equal(rolled.length, 1, 'validUntil == now rolls forward');
+  assert.equal(rolled[0].code, '654321');
+  assert.equal(rolled[0].nextCode, '');
+  assert.equal(rolled[0].validUntil, 90);
+  assert.equal(at(89, [row(60)]).entries[0].code, '654321');
+  assert.equal(at(90, [row(60)]).entries.length, 0, 'more than one window old is dropped');
+  const noNext = { ...row(60), nextCode: '' };
+  assert.equal(at(59, [noNext]).entries.length, 1, 'a helper-rolled row without a next code is current');
+  assert.equal(at(60, [noNext]).entries.length, 0, 'and cannot roll again');
+  assert.equal(at(59, [{ ...row(60), nextCode: '12' }]).entries.length, 0, 'a malformed next code still rejects the row');
   // A snapshot without a clock keeps the previous behaviour.
   assert.equal(at(0, [row(60)]).entries.length, 1);
 });
@@ -427,4 +439,17 @@ test('helper version and api fields are validated before display', () => {
   assert.equal(bad.helperVersion, '');
   assert.equal(bad.latched, false);
   assert.equal(bad.binaryReplaced, false);
+});
+
+test('wheelScroll steps a fixed distance per notch and clamps to the content', () => {
+  // A mouse notch down (angle -120) moves one step; up moves back.
+  assert.equal(M.wheelScroll(0, 1000, 400, 0, -120, 84), 84);
+  assert.equal(M.wheelScroll(84, 1000, 400, 0, 120, 84), 0);
+  // A touchpad pixel delta passes through 1:1.
+  assert.equal(M.wheelScroll(100, 1000, 400, -30, -120, 84), 130);
+  // Clamped at both ends; content shorter than the view never scrolls.
+  assert.equal(M.wheelScroll(590, 1000, 400, 0, -120, 84), 600);
+  assert.equal(M.wheelScroll(10, 1000, 400, 0, 240, 84), 0);
+  assert.equal(M.wheelScroll(0, 300, 400, 0, -120, 84), 0);
+  assert.equal(M.wheelScroll('x', undefined, null, NaN, 0, 84), 0);
 });

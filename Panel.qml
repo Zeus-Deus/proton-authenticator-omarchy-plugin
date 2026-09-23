@@ -272,6 +272,18 @@ Panel {
         interactive: contentHeight > height
         ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
 
+        // One wheel notch moves a fixed distance right away instead of starting
+        // a kinetic flick, so the list scrolls like the rest of the desktop.
+        WheelHandler {
+          acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+          onWheel: function(event) {
+            panelFlick.contentY = Model.wheelScroll(panelFlick.contentY, panelFlick.contentHeight, panelFlick.height,
+                                                    event.pixelDelta.y, event.angleDelta.y,
+                                                    Style.spacing.popupRowHeight * 3)
+            event.accepted = true
+          }
+        }
+
         Column {
           id: content
           width: panelFlick.width
@@ -330,12 +342,14 @@ Panel {
             width: parent.width
             spacing: Style.space(8)
 
+            // Keyed by row count, not by the row array: a code rollover then
+            // updates the existing rows in place (the new code fades in)
+            // instead of destroying and rebuilding the whole list.
             Repeater {
-              model: root.filteredEntries
+              model: root.filteredEntries.length
               CodeRow {
-                required property var modelData
                 required property int index
-                entry: modelData
+                entry: root.filteredEntries[index] || ({})
                 rowIndex: index
               }
             }
@@ -486,8 +500,13 @@ Panel {
     required property var entry
     required property int rowIndex
 
+    readonly property bool copied: authenticator.copiedId !== "" && authenticator.copiedId === entry.id
+
     width: parent ? parent.width : implicitWidth
     hasCursor: root.cursorActive && root.selectedIndex === rowIndex
+    // A just-copied row takes the kit's selected fill for a moment, so the
+    // confirmation sits on the code that was copied.
+    current: copied
     foreground: root.foreground
     implicitHeight: rowContent.implicitHeight + Style.space(18)
 
@@ -539,13 +558,25 @@ Panel {
         }
 
         Text {
+          id: codeText
           textFormat: Text.PlainText
-          text: codeRow.entry.code
+          text: codeRow.entry.code || ""
           color: root.foreground
           font.family: root.fontFamily
           font.pixelSize: Style.font.title
           font.letterSpacing: Style.space(1)
           Layout.alignment: Qt.AlignVCenter
+          // A new code fades in over the old one at rollover.
+          onTextChanged: codeFade.restart()
+          NumberAnimation {
+            id: codeFade
+            target: codeText
+            property: "opacity"
+            from: 0.15
+            to: 1
+            duration: 260
+            easing.type: Easing.OutCubic
+          }
         }
       }
 
@@ -567,6 +598,7 @@ Panel {
           }
         }
         Text {
+          visible: !codeRow.copied
           textFormat: Text.PlainText
           text: Model.remainingSeconds(codeRow.entry.validUntil, authenticator.now) + "s"
           color: root.dim
@@ -574,9 +606,20 @@ Panel {
           font.pixelSize: Style.font.caption
         }
         Text {
+          visible: !codeRow.copied
           textFormat: Text.PlainText
-          text: "next " + codeRow.entry.nextCode
+          // Empty for a moment right after a rollover, until the helper
+          // publishes the following code.
+          text: "next " + (codeRow.entry.nextCode || "…")
           color: root.dim
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+        }
+        Text {
+          visible: codeRow.copied
+          textFormat: Text.PlainText
+          text: "Copied · clears in 20s"
+          color: root.foreground
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
         }

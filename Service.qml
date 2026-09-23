@@ -61,6 +61,10 @@ Item {
   property var entries: []
   property string error: ""
   property string actionStatus: ""
+  // The row whose code was just copied, for a brief in-row confirmation. Only
+  // the opaque item id is kept, never the code.
+  property string copiedId: ""
+  property string pendingCopyId: ""
 
   readonly property string homeDir: Quickshell.env("HOME") || ""
   readonly property string pluginDir:
@@ -94,6 +98,7 @@ Item {
   function clearVisibleRows() {
     if (snapshotProcess.running) snapshotProcess.running = false
     entries = []
+    copiedId = ""
     now = 0
     latchFloor = Model.latchFloor(latchFloor, generation)
     generation = latchFloor
@@ -114,6 +119,7 @@ Item {
     if (hidden || copyProcess.running || lockProcess.running) return
     actionClearTimer.stop()
     actionStatus = ""
+    pendingCopyId = id
     copyProcess.command = [pythonBinary, clientPath, "copy", id]
     copyProcess.running = true
   }
@@ -251,6 +257,11 @@ Item {
       var result = Model.parseCopyResponse(String(copyOut.text || ""))
       if (exitCode !== 0) result.ok = false
       root.setActionStatus(Model.copyStatusMessage(result))
+      if (result.ok) {
+        root.copiedId = root.pendingCopyId
+        copiedClearTimer.restart()
+      }
+      root.pendingCopyId = ""
       if (result.stale) {
         // The helper's snapshot expired between render and copy. Not a failure
         // of the request; the next publication restores it.
@@ -326,6 +337,13 @@ Item {
       if (exitCode !== 0) root.setActionStatus("systemd could not start the helper")
       root.refresh()
     }
+  }
+
+  Timer {
+    id: copiedClearTimer
+    interval: 1400
+    repeat: false
+    onTriggered: root.copiedId = ""
   }
 
   Timer {

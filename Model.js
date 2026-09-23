@@ -208,12 +208,23 @@ function parseHelperSnapshot(text) {
     var nextCode = safeHelperCode(value.nextCode, type);
     var period = Math.floor(Number(value.period) || 0);
     var validUntil = Math.floor(Number(value.validUntil) || 0);
-    if (!/^[A-Za-z0-9._:-]{1,128}$/.test(id) || type === "" || code === "" || nextCode === "") continue;
+    // An empty next code is legitimate right after a rollover (see below and
+    // the helper's roll-forward); a malformed one is not.
+    var nextMalformed = value.nextCode !== undefined && value.nextCode !== null
+      && String(value.nextCode) !== "" && nextCode === "";
+    if (!/^[A-Za-z0-9._:-]{1,128}$/.test(id) || type === "" || code === "" || nextMalformed) continue;
     if (period < 15 || period > 120 || validUntil < 0) continue;
     // A row whose window has already closed by the helper's own clock is not a
-    // current code; the helper's TTL bounds how stale a snapshot can be, but
-    // the panel must not render "0s" beside a code that has rolled over.
-    if (now > 0 && validUntil <= now) continue;
+    // current code. Within one window of the rollover the row's next code was
+    // generated for exactly the window now open, so it is promoted instead of
+    // the row vanishing until the next publication; anything older is dropped
+    // so the panel never renders "0s" beside a code that has rolled over.
+    if (now > 0 && validUntil <= now) {
+      if (nextCode === "" || validUntil + period <= now) continue;
+      code = nextCode;
+      nextCode = "";
+      validUntil = validUntil + period;
+    }
     entries.push({
       id: id,
       name: sanitizeText(value.name || "Unnamed", 80),
@@ -247,6 +258,20 @@ function parseHelperSnapshot(text) {
     entries: entries,
     error: publicError(data.error || "")
   };
+}
+
+// Wheel scrolling for the code list. Qt turns each wheel notch into a
+// decelerating Flickable flick, which reads as slow motion next to every other
+// app on the desktop; stepping the content position directly moves a fixed
+// distance immediately. A touchpad reports pixelDelta and passes through 1:1;
+// a mouse notch is angleDelta 120 and moves stepPx.
+function wheelScroll(position, contentLength, viewLength, pixelDelta, angleDelta, stepPx) {
+  var at = Number(position) || 0;
+  var max = Math.max(0, (Number(contentLength) || 0) - (Number(viewLength) || 0));
+  var px = Number(pixelDelta) || 0;
+  var angle = Number(angleDelta) || 0;
+  var delta = px ? -px : (angle ? -(angle / 120) * (Number(stepPx) || 0) : 0);
+  return Math.max(0, Math.min(max, at + delta));
 }
 
 // Whether a row set actually changed. Rows are compared field by field so the
@@ -539,6 +564,7 @@ if (typeof module !== "undefined" && module.exports) {
     safeHelperCode: safeHelperCode,
     parseHelperSnapshot: parseHelperSnapshot,
     entriesEqual: entriesEqual,
+    wheelScroll: wheelScroll,
     filterEntries: filterEntries,
     clampGeneration: clampGeneration,
     latchFloor: latchFloor,
