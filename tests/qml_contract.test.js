@@ -207,7 +207,9 @@ test('the pinned helper commit matches the lock file and the AUR package', () =>
 test('every setup phase has a reachable panel action', () => {
   for (const id of ['install', 'start', 'restart', 'login', 'manage', 'add', 'show', 'refresh'])
     assert.match(panel, new RegExp(`case "${id}":`), id);
-  assert.match(panel, /else root\.runAction\(root\.primary\.id\)/);
+  assert.match(panel, /else if \(!root\.ready\) root\.runAction\(root\.primary\.id\)/);
+  // An empty, signed-out helper: Enter signs in instead of doing nothing.
+  assert.match(panel, /authenticator\.entryCount === 0\) root\.openProton\("login"\)/);
   assert.match(service, /function runSetup\(mode\)/);
   assert.match(service, /function startHelper\(\)/);
   assert.match(service, /function restartHelper\(\)/);

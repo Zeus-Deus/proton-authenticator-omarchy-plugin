@@ -235,8 +235,10 @@ Panel {
         if (dy !== 0) root.moveCursor(dy)
       }
       onActivateRequested: {
-        if (root.ready) root.copySelected()
-        else root.runAction(root.primary.id)
+        if (root.ready && root.filteredEntries.length > 0) root.copySelected()
+        // Signed out with no local codes yet: Enter starts Proton's sign-in.
+        else if (root.ready && !authenticator.synced && authenticator.entryCount === 0) root.openProton("login")
+        else if (!root.ready) root.runAction(root.primary.id)
       }
       onCloseRequested: root.close()
       onTabRequested: function(direction) { root.switchPanel(direction) }
@@ -429,7 +431,9 @@ Panel {
             width: parent.width
             textFormat: Text.PlainText
             text: root.ready
-              ? "enter copy  ·  / search  ·  a add  ·  m manage  ·  L hide  ·  x clear…"
+              ? (authenticator.entryCount === 0 && !authenticator.synced
+                ? "enter sign in  ·  a add  ·  m manage"
+                : "enter copy  ·  / search  ·  a add  ·  m manage  ·  L hide")
               : (authenticator.hidden
                 ? "enter/L show codes  ·  x clear helper copy…"
                 : (root.primary.id !== "" ? "enter " + root.primary.label.toLowerCase() + "  ·  r refresh"
