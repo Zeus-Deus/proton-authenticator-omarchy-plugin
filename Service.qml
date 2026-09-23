@@ -81,7 +81,7 @@ Item {
   readonly property string helperUnit: Model.HELPER_UNIT
   readonly property string helperCommit: "5a417199bc791bfdad27db290153c763da5182ab"
   readonly property string sourceUrl:
-    "https://github.com/Zeus-Deus/proton-authenticator-omarchy-plugin#why-a-patched-helper"
+    "https://github.com/Zeus-Deus/proton-authenticator-omarchy-plugin#how-it-works"
   readonly property bool busy: snapshotProcess.running || copyProcess.running
     || lockProcess.running || unitProcess.running
 

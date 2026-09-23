@@ -2,14 +2,13 @@
 
 ## Current state
 
-Development preview. The panel, the patched helper, the AUR package build, the
-local RFC code path, and helper-owned clipboard expiry work. Real Proton
-login/cross-device sync remains a human acceptance gate and must not be
-claimed.
+Released. The panel, the patched helper, the AUR package, and a real-account
+sign-in and phone sync have been verified end to end. Any change to login,
+sync, or copy still needs a real-account check before it ships.
 
 ## Architecture
 
-- `Panel.qml`: popup, search, countdown, code display, setup phases and their
+- `Panel.qml`: popup, type-to-search, countdown, code display, setup phases and their
   one primary action, opaque-ID actions.
 - `Service.qml`: bounded helper client processes and the two `systemctl --user`
   unit actions; no UI.
@@ -42,7 +41,7 @@ claimed.
 5. Bound response bytes, row count, and field lengths; sanitize controls/bidi;
    discard stale generations; reject out-of-range generations whole.
 6. Never install or launch `tests/fixtures/fixture-server.mjs` in production.
-7. Never claim real Proton login/sync works without a human real-account test.
+7. Never claim a login/sync change works without a human real-account test.
 8. The panel never executes the helper binary, a package manager, or sudo.
    Proton's windows open through the socket's `open` op; installs run in
    Omarchy's floating terminal where the user sees them.

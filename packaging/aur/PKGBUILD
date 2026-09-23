@@ -5,7 +5,7 @@
 # one reviewable patch, omarchy-helper.patch, that adds a private local socket
 # so the Omarchy panel plugin can show and copy codes. Login, keys, encryption
 # and sync are Proton's code, unchanged. See the patch header in the plugin repo
-# README ("Why a patched helper") for exactly what it changes.
+# README ("How it works") for exactly what it changes.
 
 pkgname=proton-authenticator-omarchy-helper
 _protonver=1.1.6

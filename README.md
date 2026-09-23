@@ -1,156 +1,152 @@
-# Proton Authenticator for Omarchy Quattro
+# Proton Authenticator for Omarchy
 
-Your Proton Authenticator codes in the Omarchy bar: search, see the current and
-next code, copy with Enter. Add, edit, and manage codes in Proton's own window,
-opened from the panel. Codes sync with Proton Authenticator on your phone.
+Your Proton Authenticator 2FA codes in the Omarchy bar. Type to search, press
+Enter to copy. Codes sync with Proton Authenticator on your phone.
 
-> Independent community integration. Not affiliated with or endorsed by Proton
-> AG or Omarchy. “Proton” and “Proton Authenticator” identify the compatible
-> service and upstream open-source client.
+![The panel with demo codes, and a search for "cloud"](preview.png)
+
+<sub>Screenshots use made-up demo accounts and codes.</sub>
+
+> Independent community plugin. Not affiliated with or endorsed by Proton AG.
+> “Proton” and “Proton Authenticator” name the service and the open-source app
+> this plugin works with.
+
+## Install
+
+```bash
+omarchy plugin add https://github.com/Zeus-Deus/proton-authenticator-omarchy-plugin.git --enable --yes
+```
+
+Or find it under Setup › Plugins. Then open the panel from the bar:
+
+1. Press **Install secure helper**. Omarchy's floating terminal opens and
+   builds the helper from Proton's official source through the AUR (a few
+   minutes; you type your sudo password there, and it asks before replacing
+   anything).
+2. Press **Sign in with Proton**. Proton's own sign-in window opens: email,
+   password, and your 2FA or security key, the same as on your phone.
+3. Your codes appear. That's it.
+
+Nothing is downloaded or built when the plugin itself is installed; the helper
+is only installed when you press the button. See [Dependencies](#dependencies).
+
+## Using it
+
+| Key | Action |
+|---|---|
+| *just type* | Fuzzy search by service or account (`gh` finds GitHub) |
+| `Enter` | Copy the highlighted code |
+| `↑` `↓` / `Ctrl+J` `Ctrl+K` | Move the selection |
+| `PgUp` `PgDn` / `Home` `End` | Jump through the list |
+| `Backspace` / `Ctrl+U` | Edit / clear the search |
+| `Esc` | Clear the search, then close the panel |
+| `Ctrl+A` | Add a code (Proton's add window: manual entry or QR image) |
+| `Ctrl+O` | Open Proton to edit, delete, reorder, import, export, or sign out |
+| `Ctrl+R` | Refresh |
+| `Ctrl+H` | Hide or show codes in this panel |
+| `Ctrl+X` | Clear the helper's copy of every code (asks first) |
+| `Tab` | Next bar panel |
+
+Letters and digits only ever search; every action uses `Ctrl`, so typing a
+name never opens a window. The mouse works too: click a row to copy it, and
+the **Add code** and **Open Proton** buttons sit under the list.
+
+<img src="docs/images/copied.png" alt="A copied row" width="414">
+
+Each row shows the current code, the next one, and the time left; the code
+turns red in its last five seconds. A copied code is cleared from the clipboard
+after 20 seconds and is marked sensitive, so Omarchy's clipboard history does
+not keep it.
+
+Adding, editing, and deleting codes happens in Proton's own window, so it
+works exactly as on your phone and syncs to your other devices.
+
+## Updates
+
+The helper is an ordinary AUR package, so **`omarchy update` updates it** with
+everything else. It switches to the new version by itself; your sign-in and
+codes are kept. When Proton releases a new Authenticator version, the package
+is rebuilt from Proton's new source and published.
+
+## Dependencies
+
+- Omarchy (Quattro shell) on Hyprland, with `wl-clipboard` (installed by
+  default).
+- A Proton account with Proton Authenticator.
+- The helper package
+  [`proton-authenticator-omarchy-helper`](https://aur.archlinux.org/packages/proton-authenticator-omarchy-helper)
+  from the AUR. The panel installs it for you (step 1 above); by hand:
+  `omarchy pkg aur add proton-authenticator-omarchy-helper`.
+
+The helper replaces Proton's own Linux app (`proton-authenticator`) on the same
+machine, because the two share one data folder and cannot run together. The
+installer asks before removing it; your codes and sign-in are kept.
 
 ## How it works
 
-There are three parts. You install one of them; the panel installs the second
-with one button; the third is your existing Proton account.
+Proton's Linux app has no command line or API, so no other program can read
+codes from it. Rather than re-implement Proton's encryption in the shell, the
+**helper is Proton's own app**, built from Proton's official source for the
+release (`release/proton-authenticator@1.1.6`) with
+[one patch](packaging/aur/omarchy-helper.patch) that:
 
-1. **This plugin** (MIT) — the panel. It shows code rows it receives from the
-   helper and sends back only an opaque row ID when you copy. It never sees
-   your password, your keys, or your secrets.
-2. **The helper** (GPL-3, AUR package `proton-authenticator-omarchy-helper`) —
-   Proton's own Authenticator app, built from Proton's official source for the
-   release, running hidden in the background as a hardened user service. It
-   does the sign-in, encryption, sync, code generation, and clipboard.
-3. **Your Proton account** — the same end-to-end encrypted sync your phone
-   uses. Nothing goes anywhere else.
+- adds a private local socket the panel talks to (owner-only, and the helper
+  checks the connecting user);
+- runs the app hidden in the background as a hardened user service, and opens
+  Proton's window on request (sign-in, add, manage);
+- turns off the in-app updater, since updates come from the package;
+- lets Hyprland float Proton's windows without a title bar.
 
-### First run
-
-1. Install the plugin from Setup → Plugins (or `omarchy plugin add`).
-2. Open the panel. It says *Secure helper not installed*; press **Install
-   secure helper**. Omarchy's floating terminal opens and builds the helper
-   from Proton's source through the AUR (a few minutes; you type your sudo
-   password into that terminal). The helper starts when it finishes.
-3. Press **Sign in with Proton**. Proton's own sign-in window opens, floating
-   in the middle of the screen like Omarchy's other password managers: email,
-   password, and your Proton 2FA or security key, exactly as on your phone. It
-   is Proton's hosted sign-in page; the panel never sees any of it.
-4. Your codes sync in and appear in the panel. The helper keeps running
-   hidden.
-
-Under Omarchy, Proton's windows float in the middle of the screen without
-their own title bar (Hyprland manages the window), and they are hidden from
-screen sharing and screenshots because they show your 2FA secrets. The package
-installs that window rule in Omarchy's `default/hypr/apps/`. To take a
-screenshot on purpose, for example for documentation:
-
-```
-omarchy-toggle proton-authenticator-screen-share on && hyprctl reload
-# reopen Proton's window, take the screenshot, then:
-omarchy-toggle proton-authenticator-screen-share off && hyprctl reload
-```
-
-### Updates
-
-The helper is an ordinary AUR package, so **`omarchy update` updates it** like
-everything else. A running helper switches to the new version by itself the
-next time Proton's window is closed; the panel shows *Update installed ·
-restart pending* until then, with a button to do it now. Your sign-in and codes
-are kept across updates.
-
-When Proton releases a new version of Authenticator, a scheduled check in this
-repository opens an issue; the package is rebuilt against Proton's new source,
-re-tested, and published to the AUR. See [Updating the pinned Proton
-release](docs/DEVELOPMENT.md#updating-the-pinned-proton-release).
-
-### Managing codes
-
-- **Copy:** Enter or `c` on a row (the helper clears it from the clipboard
-  after 20 seconds).
-- **Add a code:** `a` or **Add code** — opens Proton's add-code dialog (manual
-  entry or a QR image).
-- **Edit, delete, reorder, import, export, backups, settings, sign out:** `m`
-  or **Manage in Proton** — opens Proton's full app window.
-
-All management is Proton's own UI, so it works exactly as on your phone, and
-changes sync to your other devices.
-
-## Why a patched helper
-
-Proton's Linux app has no command line, no API, and no local socket, so no
-other program can get codes out of it. The only way to show codes in a panel
-with the unmodified app would be to decrypt its database from outside — i.e.
-reimplement Proton's crypto inside the shell — which is worse on every axis.
-
-So the helper is Proton's official 1.1.6 source for the release
-(`release/proton-authenticator@1.1.6`, commit `0deabe38`) with **one patch file**,
-[`packaging/aur/omarchy-helper.patch`](packaging/aur/omarchy-helper.patch)
-(about 2,600 added lines, nearly all in new files). It:
-
-- adds a private Unix socket (`0700` directory, `0600` socket, peer-UID check)
-  that serves the current code rows and copies a code by ID;
-- adds a hidden background mode, and an `open` request that shows Proton's own
-  window (sign-in, add code, manage);
-- adds a watchdog that reloads a stalled web view and restarts onto an upgraded
-  binary;
-- turns off Proton's in-app updater on Linux, because updates come from the
-  package (this also stops the launch-time version check to proton.me);
-- adds `libc` (for the peer-UID check) and bumps `tauri-plugin-log` from 2.8.0
-  to 2.9.0; those are the only dependency changes, and the removed
-  `Cargo.lock` lines are transitive dependencies 2.9.0 no longer pulls in;
-- adds a build check that refuses an artifact carrying Proton's QA hooks,
-  devtools, or source maps.
-
-It does **not** change Proton's login, key handling, encryption, or sync code.
-The patch is shipped inside the package at
-`/usr/share/doc/proton-authenticator-omarchy-helper/omarchy-helper.patch`, and
-the patched tree is reviewable at
-[`Zeus-Deus/WebClients`](https://github.com/Zeus-Deus/WebClients), branch
-`omarchy-authenticator-helper`.
-
-The helper replaces Proton's own Linux app on the same machine: they share one
-app identifier, data folder, keyring entry, and D-Bus name, so they cannot run
-together. The installer offers to remove Proton's app if it finds it; your
-codes and sign-in are kept.
-
-## Keys
-
-- `/` search · `j`/`k` select · Enter or `c` copy · `r` refresh
-- `a` add code · `m` manage in Proton
-- `L` hide or show rows **in this panel only** (the helper keeps its copy)
-- `x` clear the helper's copy of every code (asks first, defaults to Cancel).
-  Codes stay hidden everywhere until you press **Restart helper** in the panel.
+Sign-in, keys, encryption, and sync are Proton's code, unchanged. The patched
+tree is on the
+[`omarchy-authenticator-helper`](https://github.com/Zeus-Deus/WebClients/tree/omarchy-authenticator-helper)
+branch of a WebClients fork, and the package is built and checked from
+[`packaging/aur/`](packaging/aur/).
 
 ## Security
 
-What stays where:
+- Your Proton password, 2FA, keys, and TOTP secrets never reach the panel.
+  The panel receives only the rows it shows (service, account, current and next
+  code), only while it is open, and forgets them when it closes.
+- Copying sends the helper an item ID; the helper writes the clipboard itself
+  and clears it after 20 seconds.
+- The plugin makes no network connections of its own: no telemetry, analytics,
+  or update check. The helper talks only to Proton, like Proton's own app.
+- Proton's windows are hidden from screenshots and screen sharing, because they
+  can show your secrets. To capture one on purpose:
+  `omarchy-toggle proton-authenticator-screen-share on && hyprctl reload`,
+  reopen the window, and turn it `off` again afterwards.
+- Codes shown in the panel are ordinary pixels in the shell, so screenshots of
+  the panel itself can capture them.
+- The helper socket trusts your Unix user, not one program: anything running as
+  you could ask it for codes, just as it could read Proton's own app data. It
+  is not a defence against malware already running as your user.
 
-- Your Proton password, 2FA, keys, and TOTP secrets never reach the panel,
-  argv, environment variables, logs, notifications, or the shell's IPC.
-- The panel receives only display rows (issuer, name, current and next code)
-  while it is open, and drops them when it closes.
-- Codes you see in the panel live in the `omarchy-shell` process, so
-  screenshots, screen sharing, and shell crash dumps can capture them.
-- The helper socket authenticates your Unix user, not one application: any
-  program running as you can ask it for codes, as it could read Proton's own
-  app data. This is not a defence against malware running as your user.
+Details: [SECURITY.md](SECURITY.md).
 
-Full detail: [SECURITY.md](SECURITY.md).
+### For reviewers
 
-## Status
+The plugin runs these commands, all as fixed argv arrays with no shell in
+between (except the installer terminal, whose command line is built from
+constants only):
 
-Tested: the full panel ↔ helper protocol, RFC 6238 and Steam codes from
-Proton's official Rust core, clipboard ownership and expiry, the sandboxed
-service, the AUR package build from Proton's release tarball, and install /
-start / restart / update states.
+- `Service.qml`: `/usr/bin/python3 scripts/helper_client.py <op>` talks to the
+  helper socket. `op` is one of `status`, `snapshot`, `copy`, `lock`, `open`,
+  `probe`; the only variable arguments are a code's item ID (checked against
+  `[A-Za-z0-9._:-]{1,128}`) and a window name from `login`, `add`, `manage`.
+- `Service.qml`: `/usr/bin/systemctl --user enable --now` or `restart`
+  `proton-authenticator-omarchy-helper.service`, from the panel's **Start
+  helper** and **Restart helper** buttons.
+- `Service.qml`: **Install secure helper** opens
+  `omarchy-launch-floating-terminal-with-presentation scripts/setup-helper.sh`.
+  That script runs in a terminal you can see: `omarchy-pkg-aur-add` to
+  install, `yay -S --needed` to update, and `omarchy-pkg-drop` for Proton's own
+  app only after a `gum confirm`. `sudo` is only ever typed by you in that
+  terminal. The plugin itself never runs a package manager or `sudo`.
+- `Service.qml`: **What gets installed?** opens this README's
+  [How it works](#how-it-works) section with `omarchy-launch-browser`.
 
-Not yet tested with a real Proton account: sign-in, sync with a phone, and
-login challenges (CAPTCHA, security keys). The sign-in is Proton's unmodified
-UI, but it has not been exercised end to end here yet.
-
-Runtime requirements: Omarchy Quattro on Wayland, a user systemd session, and
-`wl-clipboard`.
-
-## Removal
+## Remove
 
 ```bash
 systemctl --user disable --now proton-authenticator-omarchy-helper.service
@@ -160,11 +156,16 @@ omarchy plugin remove io.github.zeus-deus.proton-authenticator
 
 Removing the package leaves Proton's data folder
 (`~/.local/share/me.proton.authenticator`) in place, so Proton's own app can
-take over the same sign-in. Delete it to remove every local trace; your codes
-remain on your Proton account.
+take over the same sign-in. Delete that folder to remove every local trace;
+your codes stay on your Proton account. The plugin keeps no settings or data
+of its own.
 
-## Licensing
+## Development
 
-The plugin and protocol client are MIT. The helper and the patch are GPL-3,
-like Proton's Authenticator. No Proton artwork or binaries are in this
+See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) and [SECURITY.md](SECURITY.md).
+
+## License
+
+The plugin is [MIT](LICENSE). The helper package and its patch are GPL-3.0,
+like Proton Authenticator. No Proton artwork or binaries are in this
 repository.

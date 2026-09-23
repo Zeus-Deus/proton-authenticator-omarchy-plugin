@@ -1,11 +1,11 @@
 # Security
 
-## Development warning
+## Status
 
-The panel-native helper is implemented and has been exercised with public local
-RFC fixtures and as a real AUR package build. The fixture must never be used
-with real secrets. Interactive Proton login and cross-device encrypted sync
-remain unverified until the user performs a real-account acceptance test.
+The helper has been built as the real AUR package and exercised end to end
+with a real Proton account: sign-in (email, password, 2FA), sync from a phone,
+code rollover, and copy. The test fixture uses only public RFC 6238 secrets and
+must never be used with real ones.
 
 ## Process boundary
 
@@ -127,18 +127,18 @@ helper removed that socket operation entirely.
 
 There are two distinct controls, and they are not the same strength:
 
-- **Panel-local hide (`L`).** The panel stops rendering rows and stops polling
+- **Panel-local hide (`Ctrl+H`).** The panel stops rendering rows and stops polling
   the helper. Nothing is sent over the socket, and **the helper still holds the
   codes** — this hides them from the screen, not from the machine. It is
   reversible from the panel because it never left the panel.
-- **Helper lock (`x`, and the `lock` IPC verb).** The helper clears its
+- **Helper lock (`Ctrl+X`, and the `lock` IPC verb).** The helper clears its
   published snapshot, drops the clipboard owner, and latches itself locked.
   This is one-way: the socket exposes no release operation, so the helper stays
   locked until the helper service restarts. The locked panel offers **Restart
   helper**, which runs `systemctl --user restart` on the unit — a same-UID
   action any process could already take, not a socket release path. In the
-  panel `x` opens a confirmation that defaults to Cancel, so `x` followed by
-  Enter cannot clear the helper. The watchdog never restarts a latched helper
+  panel `Ctrl+X` opens a confirmation that defaults to Cancel, so `Ctrl+X`
+  followed by Enter cannot clear the helper. The watchdog never restarts a latched helper
   for an upgrade, because that restart would release the latch.
 
 The asymmetry is deliberate. A socket "resume" operation would be callable by

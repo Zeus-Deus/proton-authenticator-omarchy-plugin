@@ -2,16 +2,20 @@
   "schemaVersion": 1,
   "id": "io.github.zeus-deus.proton-authenticator",
   "name": "Proton Authenticator",
-  "version": "0.2.0-dev",
+  "version": "0.3.0",
   "author": "Zeus-Deus",
   "license": "MIT",
-  "description": "Panel-native Proton Authenticator codes backed by a pinned, user-local helper derived from Proton's open-source client.",
-  "kinds": ["bar-widget"],
-  "entryPoints": { "barWidget": "Panel.qml" },
+  "description": "Proton Authenticator 2FA codes in the Omarchy bar: type to search, Enter to copy, synced with your phone through Proton's own app.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
   "barWidget": {
     "displayName": "Proton Authenticator",
-    "description": "Search, view, and copy codes from a pinned local Proton Authenticator helper.",
-    "category": "Security",
+    "description": "Search and copy your Proton Authenticator 2FA codes.",
+    "category": "Productivity",
     "allowMultiple": false,
     "defaultSection": "right",
     "defaults": {},
