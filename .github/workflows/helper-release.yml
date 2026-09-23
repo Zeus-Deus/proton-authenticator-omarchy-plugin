@@ -1,0 +1,74 @@
+name: Helper release
+
+# Builds the secure helper once, from packaging/helper/ at a helper-v* tag, in
+# a clean Arch Linux container, and publishes it as a GitHub release asset with
+# a signed build-provenance attestation. The plugin's installer downloads that
+# asset and installs it only if its SHA-256 matches the value pinned in
+# helper/proton-helper.lock.json of the installed plugin version, so a release
+# asset can never change what an already reviewed plugin installs.
+#
+# Free: GitHub-hosted runners and artifact attestations cost nothing for public
+# repositories.
+
+on:
+  push:
+    tags:
+      - "helper-v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: helper-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: write        # create the release
+      id-token: write        # sign the attestation (Sigstore)
+      attestations: write    # store the attestation
+      artifact-metadata: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: The tag matches the pinned helper version
+        run: |
+          set -euo pipefail
+          version=$(jq -r '.package.version' helper/proton-helper.lock.json)
+          [[ "$GITHUB_REF_NAME" == "helper-v$version" ]] \
+            || { echo "tag $GITHUB_REF_NAME does not match helper-v$version"; exit 1; }
+
+      - name: Free disk space for the build
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+
+      - name: Build in a clean Arch Linux container
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          docker run --rm \
+            -v "$PWD:/src:ro" -v "$PWD/out:/out" \
+            -e HOST_UID="$(id -u)" -e GITHUB_REPOSITORY \
+            archlinux:base-devel@sha256:8745817f349ed24373341ddb92776209eeec3f0364ea48f7f645ac5800d30a50 \
+            bash /src/.github/scripts/build-helper.sh
+
+      - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: out/*.pkg.tar.zst
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --title "Secure helper ${GITHUB_REF_NAME#helper-v}" \
+            --notes-file out/notes.md \
+            --latest=false \
+            out/*.pkg.tar.zst out/SHA256SUMS
