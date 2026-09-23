@@ -482,8 +482,8 @@ Panel {
             textFormat: Text.PlainText
             text: root.ready
               ? (authenticator.entryCount === 0 && !authenticator.synced
-                ? "enter sign in  ·  ctrl+a add  ·  ctrl+o open Proton"
-                : "type to search  ·  enter copy  ·  ctrl+a add  ·  ctrl+o open Proton  ·  ctrl+h hide")
+                ? "enter sign in  ·  ctrl+a add  ·  ctrl+o Proton"
+                : "type to search  ·  enter copy  ·  ctrl+a add  ·  ctrl+o Proton")
               : (authenticator.hidden
                 ? "enter show codes  ·  ctrl+x clear helper copy…"
                 : (root.primary.id !== "" ? "enter " + root.primary.label.toLowerCase() + "  ·  r refresh"
