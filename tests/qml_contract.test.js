@@ -239,6 +239,15 @@ test('the installer builds only the reviewed recipe, pinned file by file', () =>
   assert.ok(verify > setup.indexOf('curl --proto'));
   assert.ok(verify < setup.indexOf('install_package "$pkgfile"'));
   assert.match(setup, /--proto '=https'/);
+  // The installer deletes nothing of the user's: its only removal is its own
+  // mktemp build directory, and it never touches ~/.config or ~/.local.
+  const removals = setup.split('\n').filter((line) => /\brm\b|\bunlink\b|\brmdir\b/.test(line.replace(/#.*/, '')));
+  assert.deepEqual(removals.map((line) => line.trim()), ['[[ -n "${build:-}" ]] && rm -rf -- "$build"']);
+  assert.doesNotMatch(setup, /\.config\/systemd|\.local\/(opt|bin)|systemctl --user disable/);
+  // Replacing another package (Proton's own app, the earlier AUR build) needs
+  // the user's explicit yes first.
+  assert.ok(setup.indexOf('gum confirm "Replace it with the helper?"') < setup.indexOf('omarchy-pkg-drop'));
+  assert.ok(setup.indexOf('gum confirm "Replace it?"') < setup.indexOf('sudo pacman -U --noconfirm --ask=4'));
   assert.match(setup, /lock\["recipe"\]/);
   assert.match(setup, /makepkg --syncdeps --noconfirm/);
   // sudo is asked once before the long build, not after it (a prompt at the

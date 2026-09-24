@@ -16,6 +16,10 @@
 # Either way nothing comes from the AUR, and a newer helper only ever arrives
 # with a new plugin commit, which goes through the plugin's own review.
 #
+# It deletes nothing of the user's: the only file it removes is its own
+# private build directory. Packages change only through pacman (and Proton's
+# own app only after a confirm).
+#
 # The package is named proton-authenticator-omarchy-helper@local. AUR names
 # cannot contain '@', so no AUR package can share it and `omarchy update` never
 # replaces it. Proton's data folder (~/.local/share/me.proton.authenticator) is
@@ -26,9 +30,6 @@ PACKAGE=proton-authenticator-omarchy-helper@local
 EARLIER_AUR_BUILD=proton-authenticator-omarchy-helper
 UNIT=proton-authenticator-omarchy-helper.service
 BINARY=/usr/bin/proton-authenticator-omarchy-helper
-LEGACY_DIR="$HOME/.local/opt/proton-authenticator-omarchy-helper"
-LEGACY_LINK="$HOME/.local/bin/proton-authenticator-omarchy-helper"
-LEGACY_UNIT="$HOME/.config/systemd/user/$UNIT"
 CONFLICTS=(proton-authenticator proton-authenticator-bin proton-authenticator-git)
 PLUGIN_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 RECIPE="$PLUGIN_DIR/packaging/helper"
@@ -102,7 +103,9 @@ install_package() {
     # An earlier AUR build of this helper is installed. `--ask=4` answers
     # pacman's conflict question with yes, so it is swapped for this build in
     # one transaction instead of being removed first.
-    echo "Replacing the earlier AUR build with this reviewed build."
+    say "An earlier AUR build of the helper is installed ($EARLIER_AUR_BUILD)."
+    echo "It is replaced by the build pinned in this plugin. Your codes and sign-in are kept."
+    gum confirm "Replace it?" || fail "Nothing changed."
     sudo pacman -U --noconfirm --ask=4 "$1" || fail "The helper did not install."
   else
     sudo pacman -U --noconfirm "$1" || fail "The helper did not install."
@@ -158,17 +161,7 @@ EOF
 fi
 [[ -x "$BINARY" ]] || fail "The helper binary is missing after install."
 
-# 3. Retire a hand-built development helper, if any. Its user unit in
-#    ~/.config would shadow the packaged one in /usr/lib/systemd/user.
-if [[ -e "$LEGACY_UNIT" || -e "$LEGACY_LINK" || -d "$LEGACY_DIR" ]]; then
-  say "Switching from the development helper to the packaged one…"
-  systemctl --user disable --now "$UNIT" 2>/dev/null || true
-  rm -f -- "$LEGACY_UNIT"
-  [[ -L "$LEGACY_LINK" ]] && rm -f -- "$LEGACY_LINK"
-  rm -rf -- "$LEGACY_DIR"
-fi
-
-# 4. Start it for this user and wait for its socket.
+# 3. Start it for this user and wait for its socket.
 systemctl --user daemon-reload
 systemctl --user enable "$UNIT" >/dev/null
 systemctl --user restart "$UNIT"

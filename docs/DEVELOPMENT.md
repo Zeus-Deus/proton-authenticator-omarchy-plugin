@@ -157,8 +157,8 @@ update:
   `journalctl -k | grep -i 'syscall=27'` when codes stop publishing while the
   unit is active.
 - A user unit in `~/.config/systemd/user/` shadows the packaged one in
-  `/usr/lib/systemd/user/`. `probe` reports it as `legacy`, and the panel
-  offers the switch.
+  `/usr/lib/systemd/user/`. That is the user's own override: the plugin never
+  deletes or edits files in the user's home, so leave it to them.
 - The helper and Proton's official Linux app share one app id, data folder,
   keyring entry, and D-Bus name. Never run both.
 - `Panel.qml` opens Proton's window only after closing itself, because the

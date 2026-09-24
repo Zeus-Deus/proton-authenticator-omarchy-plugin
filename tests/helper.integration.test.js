@@ -490,14 +490,12 @@ test('probe reports local setup facts without contacting any socket', () => {
     assert.equal(result.status, 0, result.stderr);
     let probe = Model.parseProbe(result.stdout);
     assert.equal(probe.ok, true);
-    assert.equal(probe.legacy, false);
     assert.match(probe.unit, /^(active|activating|inactive|failed|deactivating|unknown)$/);
-    // A development install leaves a user unit that shadows the package's.
+    // Files the user manages under the same names are not the plugin's
+    // business: they change nothing in the probe.
     fs.mkdirSync(path.join(home, '.config', 'systemd', 'user'), { recursive: true });
     fs.writeFileSync(path.join(home, '.config', 'systemd', 'user', 'proton-authenticator-omarchy-helper.service'), '');
-    probe = Model.parseProbe(run().stdout);
-    assert.equal(probe.legacy, true);
-    assert.equal(Model.setupPhase({ available: false, probe }), 'migrate');
+    assert.deepEqual(Model.parseProbe(run().stdout), probe);
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }

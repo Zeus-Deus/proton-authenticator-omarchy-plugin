@@ -185,13 +185,6 @@ def probe() -> dict:
     connects to the helper socket, so it is safe to run while the helper is
     down or not installed at all.
     """
-    home = Path(os.environ.get("HOME", "") or "/nonexistent")
-    # A hand-built development install. Its user unit in ~/.config shadows the
-    # packaged one in /usr/lib/systemd/user, so it counts even next to the package.
-    legacy = (
-        (home / ".local/opt/proton-authenticator-omarchy-helper/proton-authenticator").is_file()
-        or (home / ".config/systemd/user" / HELPER_UNIT).is_file()
-    )
     unit = "unknown"
     try:
         result = subprocess.run(
@@ -218,7 +211,6 @@ def probe() -> dict:
         "ok": True,
         "installed": HELPER_BINARY.is_file() and os.access(HELPER_BINARY, os.X_OK),
         "unit": unit,
-        "legacy": legacy,
         "conflict": any(path.exists() for path in CONFLICTING_BINARIES),
         "aurBuild": aur_build,
     }

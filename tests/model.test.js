@@ -351,15 +351,12 @@ test('sanitizeText strips the remaining invisible and filler code points', () =>
 
 test('setupPhase maps every helper situation to exactly one next step', () => {
   const api = M.REQUIRED_HELPER_API;
-  const probe = (p) => Object.assign({ ok: true, installed: true, unit: 'inactive', legacy: false, conflict: false }, p);
+  const probe = (p) => Object.assign({ ok: true, installed: true, unit: 'inactive', conflict: false }, p);
   const phase = (v) => M.setupPhase(v);
   // Socket down: the local probe decides.
   assert.equal(phase({ available: false, probe: probe({ installed: false }) }), 'install');
   assert.equal(phase({ available: false, probe: probe({ installed: false, conflict: true }) }), 'install');
   assert.equal(phase({ available: false, probe: probe({ conflict: true }) }), 'install');
-  assert.equal(phase({ available: false, probe: probe({ installed: false, legacy: true }) }), 'migrate');
-  // A leftover development unit in ~/.config shadows the packaged one.
-  assert.equal(phase({ available: false, probe: probe({ legacy: true }) }), 'migrate');
   assert.equal(phase({ available: false, probe: probe({ unit: 'inactive' }) }), 'start');
   assert.equal(phase({ available: false, probe: probe({ unit: 'failed' }) }), 'start');
   assert.equal(phase({ available: false, probe: probe({ unit: 'active' }) }), 'starting');
@@ -371,12 +368,10 @@ test('setupPhase maps every helper situation to exactly one next step', () => {
   assert.equal(phase(Object.assign({}, up, { api: 1 })), 'update');
   assert.equal(phase(Object.assign({}, up, { api: undefined })), 'update');
   // An old helper answering: the files on disk decide the fix.
-  assert.equal(phase(Object.assign({}, up, { api: 0, probe: probe({ legacy: true }) })), 'migrate');
   assert.equal(phase(Object.assign({}, up, { api: 0, probe: probe({ unit: 'active' }) })), 'restart');
   assert.equal(phase(Object.assign({}, up, { api: 0, probe: probe({ installed: false }) })), 'update');
   assert.equal(phase(Object.assign({}, up, { api: 0, probe: { ok: false } })), 'update');
   // The header agrees with the button for an old helper.
-  assert.equal(M.statusMessage(Object.assign({ checked: true }, up, { api: 0, probe: probe({ legacy: true }) })), 'Development helper running');
   assert.equal(M.statusMessage(Object.assign({ checked: true }, up, { api: 0, probe: probe({ unit: 'active' }) })), 'Update installed · restart pending');
   assert.equal(M.statusMessage(Object.assign({ checked: true }, up, { api: 0, probe: probe({ installed: false }) })), 'Secure helper needs an update');
   assert.equal(phase(Object.assign({}, up, { binaryReplaced: true })), 'restart');
@@ -413,11 +408,11 @@ test('setupPhase maps every helper situation to exactly one next step', () => {
 
 test('parseProbe accepts only the fixed probe shape', () => {
   assert.deepEqual(M.parseProbe('{"v":1,"ok":true,"installed":true,"unit":"active","legacy":false,"conflict":false}'),
-    { ok: true, installed: true, unit: 'active', legacy: false, conflict: false, aurBuild: false });
+    { ok: true, installed: true, unit: 'active', conflict: false, aurBuild: false });
   assert.equal(M.parseProbe('{"v":1,"ok":true,"installed":true,"unit":"active","legacy":false,"conflict":false,"aurBuild":true}').aurBuild, true);
   // Unknown unit states and non-boolean flags collapse to safe values.
   assert.deepEqual(M.parseProbe('{"v":1,"ok":true,"installed":"yes","unit":"rm -rf","legacy":1,"conflict":null}'),
-    { ok: true, installed: false, unit: 'unknown', legacy: false, conflict: false, aurBuild: false });
+    { ok: true, installed: false, unit: 'unknown', conflict: false, aurBuild: false });
   for (const bad of ['', 'nope', '{"v":2,"ok":true}', '{"v":1,"ok":false}', '[]'])
     assert.equal(M.parseProbe(bad).ok, false, bad);
 });

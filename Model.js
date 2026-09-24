@@ -413,14 +413,13 @@ function parseProbe(text) {
   var data = null;
   try { data = JSON.parse(String(text || "")); } catch (e) { data = null; }
   if (!data || typeof data !== "object" || data.v !== 1 || data.ok !== true)
-    return { ok: false, installed: false, unit: "unknown", legacy: false, conflict: false, aurBuild: false };
+    return { ok: false, installed: false, unit: "unknown", conflict: false, aurBuild: false };
   var units = { active: true, activating: true, inactive: true, failed: true, deactivating: true };
   var unit = String(data.unit || "");
   return {
     ok: true,
     installed: data.installed === true,
     unit: units[unit] ? unit : "unknown",
-    legacy: data.legacy === true,
     conflict: data.conflict === true,
     aurBuild: data.aurBuild === true
   };
@@ -429,8 +428,7 @@ function parseProbe(text) {
 // Single source of truth for what the panel shows and what its main button
 // does. Each phase has exactly one primary action.
 //   install   — helper package missing (or a conflicting Proton app is)
-//   migrate   — the old hand-built development helper, or an earlier AUR
-//               build, is present; switch to the reviewed recipe's build
+//   migrate   — an earlier AUR build is installed; switch to the pinned build
 //   start     — package installed, service not running
 //   starting  — service running, socket not up yet
 //   update    — running helper is older than, or built from a different
@@ -448,19 +446,15 @@ function setupPhase(view) {
     var p = v.probe || {};
     if (p.ok !== true) return "starting";
     if (p.conflict === true) return "install";
-    if (p.legacy === true) return "migrate";
     if (p.installed !== true) return "install";
     if (p.unit === "active" || p.unit === "activating") return "starting";
     return "start";
   }
   if (v.latched === true) return "locked";
   if (Math.floor(Number(v.api) || 0) < REQUIRED_HELPER_API) {
-    // An old helper is answering. Which fix applies depends on what is on
-    // disk: a leftover hand-built install is switched over (no download); an
-    // installed package means the old process predates it and only needs a
-    // restart; otherwise fetch the package.
+    // An old helper is answering. An installed package means the old process
+    // predates it and only needs a restart; otherwise fetch the package.
     var q = v.probe || {};
-    if (q.ok === true && q.legacy === true) return "migrate";
     if (q.ok === true && q.installed === true) return "restart";
     return "update";
   }
@@ -554,14 +548,12 @@ function statusMessage(view) {
   if (v.available !== true) {
     var phase = setupPhase(v);
     if (phase === "install") return (v.probe && v.probe.conflict) ? "Proton's own app is installed" : "Secure helper not installed";
-    if (phase === "migrate") return "Development helper found";
     if (phase === "start") return "Secure helper is stopped";
     return publicError(v.error) || "Secure helper unavailable";
   }
   if (v.latched === true) return "Helper copy cleared";
   if (Math.floor(Number(v.api) || 0) < REQUIRED_HELPER_API) {
     var old = setupPhase(v);
-    if (old === "migrate") return "Development helper running";
     if (old === "restart") return "Update installed · restart pending";
     return "Secure helper needs an update";
   }
@@ -584,7 +576,7 @@ function hintMessage(view) {
   if (phase === "install")
     return "Codes come from Proton's official Authenticator, built once from source with a private local socket. Built from this plugin's own reviewed recipe; plugin updates bring helper updates.";
   if (phase === "migrate")
-    return "Switch the helper to the build from this plugin's reviewed recipe (earlier builds came from the AUR or by hand). Your codes and sign-in are kept.";
+    return "Switch the helper to the build pinned by this plugin (the earlier one came from the AUR). Your codes and sign-in are kept.";
   if (phase === "start") return "The helper is installed but not running.";
   if (phase === "starting") return "Waiting for the secure helper to start…";
   if (phase === "update")
