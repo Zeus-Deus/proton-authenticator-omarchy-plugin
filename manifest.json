@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.zeus-deus.proton-authenticator",
   "name": "Proton Authenticator",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "author": "Zeus-Deus",
   "license": "MIT",
   "description": "Proton Authenticator 2FA codes in the Omarchy bar: type to search, Enter to copy, synced with your phone through Proton's own app.",

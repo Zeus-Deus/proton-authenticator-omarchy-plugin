@@ -245,9 +245,21 @@ test('the installer builds only the reviewed recipe, pinned file by file', () =>
   assert.deepEqual(removals.map((line) => line.trim()), ['[[ -n "${build:-}" ]] && rm -rf -- "$build"']);
   assert.doesNotMatch(setup, /\.config\/systemd|\.local\/(opt|bin)|systemctl --user disable/);
   // Replacing another package (Proton's own app, the earlier AUR build) needs
-  // the user's explicit yes first.
-  assert.ok(setup.indexOf('gum confirm "Replace it with the helper?"') < setup.indexOf('omarchy-pkg-drop'));
-  assert.ok(setup.indexOf('gum confirm "Replace it?"') < setup.indexOf('sudo pacman -U --noconfirm --ask=4'));
+  // the user's explicit yes first, and happens only inside the pacman -U
+  // transaction that installs the verified helper: no separate removal step
+  // can leave the user without a working authenticator.
+  const code = setup.split('\n').map((line) => line.replace(/#.*/, '')).join('\n');
+  assert.doesNotMatch(code, /omarchy-pkg-drop|omarchy pkg drop|pacman\s+(-R|--remove)|pacman\s+-S\w*R/);
+  assert.deepEqual(code.match(/sudo pacman [^\n]*/g),
+    ['sudo pacman -U --noconfirm --ask=4 "$1" \\', 'sudo pacman -U --noconfirm "$1" || fail "The helper did not install."']);
+  for (const confirm of ['gum confirm "Replace it with the helper?"', 'gum confirm "Replace it?"']) {
+    assert.ok(setup.indexOf(confirm) !== -1, confirm);
+    assert.ok(setup.indexOf(confirm) < setup.indexOf('sudo -v'), confirm);
+  }
+  // The package itself declares every package the installer offers to replace.
+  const conflicts = (pkgbuild.match(/conflicts=\(([^)]*)\)/) || [])[1].split(/\s+/).filter(Boolean);
+  const offered = (setup.match(/^CONFLICTS=\(([^)]*)\)/m) || [])[1].split(/\s+/).filter(Boolean);
+  for (const name of [...offered, 'proton-authenticator-omarchy-helper']) assert.ok(conflicts.includes(name), name);
   assert.match(setup, /lock\["recipe"\]/);
   assert.match(setup, /makepkg --syncdeps --noconfirm/);
   // sudo is asked once before the long build, not after it (a prompt at the

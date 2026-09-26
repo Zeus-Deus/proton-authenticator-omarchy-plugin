@@ -183,8 +183,10 @@ running makes the helper exit 0 (which `Restart=on-failure` does not restart),
 and a version drift between the two would run the newer one's database
 migration against the other's data. The helper *is* the pinned official 1.1.6
 source plus the socket; this host runs only the helper. The helper package
-declares `conflicts=` on Proton's packages, and the installer offers to remove
-them.
+declares `conflicts=` on Proton's packages. After the user confirms, the
+installer swaps them for the helper in the single `pacman -U` transaction that
+installs the verified package; it never removes them in a separate step, so a
+failed download, checksum, or install leaves the user's current app in place.
 
 ## Clipboard
 

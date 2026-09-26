@@ -161,8 +161,10 @@ constants only):
   That script runs in a terminal you can see. It downloads the helper package
   over HTTPS from this repository's `helper-v*` release (URL and SHA-256 from
   `helper/proton-helper.lock.json`), installs it with `sudo pacman -U` only if
-  the SHA-256 matches, and replaces Proton's own app (`omarchy-pkg-drop`) or
-  an earlier AUR build of the helper only after a `gum confirm`. It deletes
+  the SHA-256 matches. Proton's own app or an earlier AUR build of the helper
+  is replaced only after a `gum confirm`, and only inside that same
+  `pacman -U` transaction (the package declares `conflicts=` on them), so a
+  failed download, checksum, or install leaves your current app installed. It deletes
   no files of yours; the only thing it removes is its own temporary download
   directory. With `--from-source` it instead checks
   `packaging/helper/` against its pins and builds it with `makepkg`. Nothing

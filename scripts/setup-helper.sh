@@ -60,6 +60,34 @@ installed_conflicts=()
 for pkg in "${CONFLICTS[@]}"; do
   pacman -Q "$pkg" &>/dev/null && installed_conflicts+=("$pkg")
 done
+earlier_aur_build=false
+pacman -Q "$EARLIER_AUR_BUILD" &>/dev/null && earlier_aur_build=true
+
+# 1. Proton's own Linux app cannot run next to the helper (same app id, data
+#    folder, keyring entry, and D-Bus name), and neither can an earlier AUR
+#    build of this helper. Ask first; nothing is removed here. The package
+#    declares conflicts= on all of them, so pacman swaps them for the helper
+#    in the same transaction that installs it (step 2), only after the new
+#    package is downloaded and verified. If anything fails before or during
+#    that transaction, the installed app stays exactly as it was.
+if ((${#installed_conflicts[@]} > 0)); then
+  say "Proton's own Authenticator app is installed: ${installed_conflicts[*]}"
+  echo "The helper is the same Proton app built from source with a private socket"
+  echo "for the panel. The two share one data folder and cannot run together."
+  echo "It is swapped for the helper in one step, only once the helper is verified."
+  echo "Your codes and sign-in are kept."
+  gum confirm "Replace it with the helper?" || fail "Nothing changed."
+fi
+if [[ "$earlier_aur_build" == true ]]; then
+  say "An earlier AUR build of the helper is installed ($EARLIER_AUR_BUILD)."
+  echo "It is replaced by the build pinned in this plugin. Your codes and sign-in are kept."
+  gum confirm "Replace it?" || fail "Nothing changed."
+fi
+# Anything to replace forces an install, even if the pinned version is current.
+replace=false
+if ((${#installed_conflicts[@]} > 0)) || [[ "$earlier_aur_build" == true ]]; then
+  replace=true
+fi
 
 # Ask for sudo once, up front, and keep it fresh through the long build (like
 # omarchy-sudo-keepalive), so the install step never waits on a prompt that
@@ -75,44 +103,32 @@ trap cleanup EXIT
 trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
-if [[ "$have" != "$want" ]] || ((${#installed_conflicts[@]} > 0)); then
+if [[ "$have" != "$want" ]] || [[ "$replace" == true ]]; then
   say "Your password is needed once, to install the helper package."
   sudo -v || fail "Nothing changed."
   while true; do sudo -n true; sleep 60; done 2>/dev/null &
   keepalive=$!
 fi
 
-# 1. Proton's own Linux app cannot run next to the helper (same app id, data
-#    folder, keyring entry, and D-Bus name). Offer to remove it; codes stay on
-#    the Proton account and in the shared data folder.
-if ((${#installed_conflicts[@]} > 0)); then
-  say "Proton's own Authenticator app is installed: ${installed_conflicts[*]}"
-  echo "The helper is the same Proton app built from source with a private socket"
-  echo "for the panel. The two share one data folder and cannot run together."
-  echo "Your codes and sign-in are kept."
-  gum confirm "Replace it with the helper?" || fail "Nothing changed."
-  omarchy-pkg-drop "${installed_conflicts[@]}"
-fi
-
 # 2. Install the pinned helper unless exactly that version is already
-#    installed. Work in a private directory outside the plugin checkout (so it
-#    stays clean for `omarchy plugin update`), removed afterwards.
+#    installed and nothing needs replacing. Work in a private directory outside
+#    the plugin checkout (so it stays clean for `omarchy plugin update`),
+#    removed afterwards.
 install_package() {
   say "Installing $PACKAGE $want…"
-  if pacman -Q "$EARLIER_AUR_BUILD" &>/dev/null; then
-    # An earlier AUR build of this helper is installed. `--ask=4` answers
-    # pacman's conflict question with yes, so it is swapped for this build in
-    # one transaction instead of being removed first.
-    say "An earlier AUR build of the helper is installed ($EARLIER_AUR_BUILD)."
-    echo "It is replaced by the build pinned in this plugin. Your codes and sign-in are kept."
-    gum confirm "Replace it?" || fail "Nothing changed."
-    sudo pacman -U --noconfirm --ask=4 "$1" || fail "The helper did not install."
+  if [[ "$replace" == true ]]; then
+    # `--ask=4` answers pacman's conflict question with yes (the user already
+    # confirmed above), so the conflicting package is removed in the same
+    # transaction that installs the verified helper, never before it. A failed
+    # transaction leaves it installed.
+    sudo pacman -U --noconfirm --ask=4 "$1" \
+      || fail "The helper did not install. Your current app is still installed."
   else
     sudo pacman -U --noconfirm "$1" || fail "The helper did not install."
   fi
 }
 
-if [[ "$have" != "$want" ]]; then
+if [[ "$have" != "$want" ]] || [[ "$replace" == true ]]; then
   build_root="${XDG_CACHE_HOME:-$HOME/.cache}"
   mkdir -p -- "$build_root"
   build=$(mktemp -d "$build_root/proton-authenticator-helper-build.XXXXXX")
